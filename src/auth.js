@@ -74,6 +74,11 @@ export function disable2fa(userId) {
   run('UPDATE users SET totp_secret=NULL WHERE id=?', userId);
 }
 
+// Примусове завершення сесії: тільки своєї (чужі — через офбординг).
+export function killSession(userId, token) {
+  return Number(run('DELETE FROM sessions WHERE user_id=? AND token=?', userId, token).changes);
+}
+
 export function sessionsOf(userId) {
   return all('SELECT token, ip, user_agent, created_at, expires_at FROM sessions WHERE user_id=?', userId);
 }

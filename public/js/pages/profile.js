@@ -43,12 +43,20 @@ export async function renderProfile() {
   const sessions = await api.get('/auth/sessions');
   box.append(el('div', { class: 'card' }, el('h3', {}, 'Активні сесії'),
     el('div', { class: 'table-wrap' }, el('table', {},
-      el('thead', {}, el('tr', {}, el('th', {}, 'Створена'), el('th', {}, 'Діє до'), el('th', {}, 'IP'), el('th', {}, 'Пристрій'))),
+      el('thead', {}, el('tr', {}, el('th', {}, 'Створена'), el('th', {}, 'Діє до'), el('th', {}, 'IP'), el('th', {}, 'Пристрій'), el('th', {}, ''))),
       el('tbody', {}, ...sessions.rows.map((s) => el('tr', {},
         el('td', {}, String(s.created_at).slice(0, 16)),
         el('td', {}, String(s.expires_at).slice(0, 16)),
         el('td', {}, s.ip || '—'),
-        el('td', {}, String(s.user_agent || '—').slice(0, 40)))))))));
+        el('td', {}, String(s.user_agent || '—').slice(0, 40)),
+        el('td', {}, el('button', {
+          class: 'btn small danger',
+          onclick: async () => {
+            await api.del(`/auth/sessions/${encodeURIComponent(s.token)}`);
+            toast('Сесію завершено');
+            location.reload();
+          },
+        }, 'Завершити')))))))));
 
   return box;
 }

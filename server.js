@@ -9,6 +9,10 @@ import { fail, send } from './src/http.js';
 import { flushQueue, runChecks } from './src/telegram.js';
 import { dbFile } from './src/db.js';
 import { bootstrapOwner } from './src/bootstrap.js';
+import { migrate } from './src/migrate.js';
+import { seedRoles, syncNewEntities } from './src/rbac.js';
+import { expireOverdue } from './src/vault.js';
+import { backupDatabase } from './src/backup.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, 'public');
@@ -47,7 +51,11 @@ const app = http.createServer(async (req, res) => {
   } catch (e) {
     const status = e.status || 500;
     if (status >= 500) console.error('[crm]', e);
-    return fail(res, status, e.message || 'Внутрішня помилка');
+    // Підказки для інтерфейсу: чому саме відмовлено — щоб показати кнопку
+    // «запросити доступ», а не просто червоний тост.
+    const hints = {};
+    for (const key of ['needApproval', 'needGrant', 'need2fa']) if (e[key]) hints[key] = true;
+    return fail(res, status, e.message || 'Внутрішня помилка', hints);
   }
 });
 
@@ -64,6 +72,9 @@ const postbackApp = http.createServer((req, res) => {
   }
 });
 
+migrate();
+seedRoles();
+syncNewEntities();
 bootstrapOwner();
 
 if (process.env.CRM_ROLE !== 'postback') {
@@ -81,7 +92,12 @@ if (PB_PORT > 0) {
 
 // Фонові перевірки й розсилка (аналог BullMQ-воркера на малому масштабі).
 const tick = async () => {
-  try { runChecks(); await flushQueue(); } catch (e) { console.error('[worker]', e.message); }
+  try {
+    runChecks();
+    expireOverdue();       // протерміновані видачі доступів
+    backupDatabase();      // добова копія бази поруч із самою базою на томі
+    await flushQueue();
+  } catch (e) { console.error('[worker]', e.message); }
 };
 setInterval(tick, Number(process.env.CRM_TICK_MS || 15 * 60_000)).unref();
 setTimeout(tick, 5_000).unref();

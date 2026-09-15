@@ -1,6 +1,11 @@
 // RBAC: рівень доступу (none|read|write|full) + скоуп (all|team|own) для кожної
 // пари роль×сутність, плюс приховування полів (ставки/фінанси) і капабіліті.
+//
+// Матриця нижче — це ДЕФОЛТИ, якими наповнюється БД при першому старті.
+// Далі джерелом істини є таблиці roles/role_permissions, які редагуються
+// в інтерфейсі: нова роль з'являється без деплою.
 import { entities } from './entities.js';
+import { all, get, run, insert } from './db.js';
 
 export const LEVELS = { none: 0, read: 1, write: 2, full: 3 };
 
@@ -8,6 +13,7 @@ const R = (level, scope = 'all') => ({ level, scope });
 
 // Базові набори, щоб матриця читалась, а не розповзалась на 200 рядків.
 const RESOURCE = ['accounts', 'devices', 'sims', 'proxies', 'mail_accounts', 'resource_assignments', 'account_events'];
+const VAULT_SELF = { credentials: R('read', 'own'), credential_grants: R('read', 'own'), access_requests: R('write', 'own') };
 const CONTENT = ['creatives', 'creative_versions', 'tasks'];
 const MONEY = ['expenses', 'payouts', 'salary_rules', 'partners', 'offers', 'offer_rates_history'];
 
@@ -15,13 +21,16 @@ function spread(keys, rule) {
   return Object.fromEntries(keys.map((k) => [k, rule]));
 }
 
-export const matrix = {
+export const defaultMatrix = {
   owner: { '*': R('full', 'all') },
 
   head: { '*': R('full', 'all'), audit_log: R('read', 'all') },
 
   teamlead: {
     ...spread(RESOURCE, R('write', 'team')),
+    credentials: R('write', 'team'),
+    credential_grants: R('read', 'team'),
+    access_requests: R('full', 'team'),
     ...spread(CONTENT, R('full', 'team')),
     posts: R('full', 'team'),
     tracking_links: R('write', 'team'),
@@ -38,6 +47,7 @@ export const matrix = {
   },
 
   creator: {
+    ...VAULT_SELF,
     accounts: R('read', 'own'),
     posts: R('full', 'own'),
     creatives: R('write', 'own'),
@@ -52,6 +62,7 @@ export const matrix = {
   },
 
   editor: {
+    ...VAULT_SELF,
     creatives: R('write', 'all'),
     creative_versions: R('full', 'all'),
     tasks: R('write', 'own'),
@@ -63,6 +74,9 @@ export const matrix = {
 
   farmer: {
     ...spread(RESOURCE, R('full', 'all')),
+    credentials: R('full', 'all'),
+    credential_grants: R('read', 'all'),
+    access_requests: R('write', 'own'),
     posts: R('read', 'all'),
     payouts: R('read', 'own'),
     kpi_targets: R('read', 'own'),
@@ -72,6 +86,7 @@ export const matrix = {
 
   finance: {
     ...spread(MONEY, R('full', 'all')),
+    credentials: R('read', 'own'), credential_grants: R('read', 'own'), access_requests: R('write', 'own'),
     conversions: R('write', 'all'),
     posts: R('read', 'all'),
     accounts: R('read', 'all'),
@@ -83,10 +98,14 @@ export const matrix = {
     devices: R('read', 'all'), sims: R('read', 'all'), proxies: R('read', 'all'), mail_accounts: R('read', 'all'),
   },
 
-  analyst: { '*': R('read', 'all'), audit_log: R('none'), salary_rules: R('none') },
+  // Аналітик читає цифри, але не сейф: інакше «read all» тихо відкриває креди.
+  analyst: {
+    '*': R('read', 'all'), audit_log: R('none'), salary_rules: R('none'),
+    credentials: R('none'), credential_grants: R('none'), access_requests: R('none'),
+  },
 };
 
-// Капабіліті поза CRUD.
+// Капабіліті поза CRUD (дефолти для сідингу таблиці roles).
 const CAPS = {
   owner: ['secrets', 'export', 'salary_calc', 'settings', 'impersonate_filters'],
   head: ['secrets', 'export', 'salary_calc', 'settings'],
@@ -94,14 +113,90 @@ const CAPS = {
   farmer: ['secrets'],
   finance: ['export', 'salary_calc'],
   analyst: ['export'],
-  creator: [],
-  editor: [],
+  // Крієйтору потрібне розкриття — інакше видача доступів безглузда. Межі
+  // ставить не роль, а сам сейф: лише те, що на руках, і добовий ліміт.
+  creator: ['secrets'],
+  editor: ['secrets'],
 };
 
-export function rule(user, entityKey) {
-  const m = matrix[user?.role] || {};
+export const ROLE_LABELS = {
+  owner: 'Власник', head: 'Хед', teamlead: 'Тімлід', creator: 'Крієйтор',
+  editor: 'Монтажер', farmer: 'Фармер', finance: 'Фінансист', analyst: 'Аналітик',
+};
+
+// ── Шар БД ────────────────────────────────────────────────────────────────
+let cache = null;
+
+export function invalidateRbacCache() { cache = null; }
+
+function loadCache() {
+  if (cache) return cache;
+  const roles = new Map();
+  for (const r of all('SELECT * FROM roles')) roles.set(r.key, { ...r, perms: new Map() });
+  for (const p of all('SELECT * FROM role_permissions')) {
+    roles.get(p.role_key)?.perms.set(p.entity, p);
+  }
+  cache = roles;
+  return cache;
+}
+
+// Первинне наповнення: дефолти з коду → БД. Наявні рядки не чіпаємо.
+export function seedRoles() {
+  if (get('SELECT key FROM roles LIMIT 1')) return { seeded: 0 };
+  let seeded = 0;
+  for (const [key, label] of Object.entries(ROLE_LABELS)) {
+    const caps = CAPS[key] || [];
+    run(`INSERT INTO roles (key, label, is_system, can_export, can_reveal, can_salary_calc, can_settings, reveal_daily_limit)
+         VALUES (?,?,1,?,?,?,?,?)`,
+      key, label,
+      caps.includes('export') ? 1 : 0, caps.includes('secrets') ? 1 : 0,
+      caps.includes('salary_calc') ? 1 : 0, caps.includes('settings') ? 1 : 0,
+      { owner: 200, head: 200, teamlead: 50, farmer: 50 }[key] ?? 5);
+    for (const entityKey of Object.keys(entities)) {
+      const r = defaultRule(key, entityKey);
+      const hidden = entities[entityKey].fields.filter((f) => (f.hideFor || []).includes(key)).map((f) => f.name);
+      insert('role_permissions', {
+        role_key: key, entity: entityKey, level: r.level, scope: r.scope,
+        hidden_fields: hidden.join(',') || null,
+      });
+    }
+    seeded += 1;
+  }
+  invalidateRbacCache();
+  return { seeded };
+}
+
+// Права для сутностей, доданих після сідингу (нові модулі в оновленні).
+export function syncNewEntities() {
+  const known = new Set(all('SELECT DISTINCT entity FROM role_permissions').map((r) => r.entity));
+  const missing = Object.keys(entities).filter((k) => !known.has(k));
+  if (!missing.length) return { added: 0 };
+  for (const role of all('SELECT key FROM roles')) {
+    for (const entityKey of missing) {
+      const r = defaultRule(role.key, entityKey);
+      const hidden = entities[entityKey].fields.filter((f) => (f.hideFor || []).includes(role.key)).map((f) => f.name);
+      insert('role_permissions', {
+        role_key: role.key, entity: entityKey, level: r.level, scope: r.scope,
+        hidden_fields: hidden.join(',') || null,
+      });
+    }
+  }
+  invalidateRbacCache();
+  return { added: missing.length };
+}
+
+function defaultRule(roleKey, entityKey) {
+  const m = defaultMatrix[roleKey] || {};
   return m[entityKey] || m['*'] || R('none');
 }
+
+export function rule(user, entityKey) {
+  const role = loadCache().get(user?.role);
+  if (!role) return defaultRule(user?.role, entityKey);
+  return role.perms.get(entityKey) || R('none');
+}
+
+export const roleRow = (roleKey) => loadCache().get(roleKey) || null;
 
 export function can(user, entityKey, action) {
   const need = { read: 1, create: 2, update: 2, delete: 3 }[action] ?? 3;
@@ -112,7 +207,17 @@ export function can(user, entityKey, action) {
 }
 
 export const scopeOf = (user, entityKey) => rule(user, entityKey).scope;
-export const capable = (user, cap) => (CAPS[user?.role] || []).includes(cap);
+
+const CAP_COLUMNS = { export: 'can_export', secrets: 'can_reveal', salary_calc: 'can_salary_calc', settings: 'can_settings' };
+
+export function capable(user, cap) {
+  const role = loadCache().get(user?.role);
+  if (!role) return (CAPS[user?.role] || []).includes(cap);
+  const column = CAP_COLUMNS[cap];
+  return column ? !!role[column] : (CAPS[user?.role] || []).includes(cap);
+}
+
+export const revealLimit = (user) => Number(loadCache().get(user?.role)?.reveal_daily_limit ?? 20);
 
 // SQL-фільтр за скоупом. Повертає {sql, params} для WHERE.
 export function scopeWhere(user, entityKey, alias = 't') {
@@ -156,7 +261,17 @@ export function ownsRow(user, entityKey, row) {
 export function hiddenFields(user, entityKey) {
   const ent = entities[entityKey];
   if (!ent) return [];
+  const perm = loadCache().get(user?.role)?.perms.get(entityKey);
+  if (perm) return String(perm.hidden_fields || '').split(',').map((f) => f.trim()).filter(Boolean);
   return ent.fields.filter((f) => (f.hideFor || []).includes(user?.role)).map((f) => f.name);
+}
+
+// ab***@gmail.com — щоб список доступів не був готовою базою для зливу.
+function maskValue(value) {
+  const v = String(value);
+  const at = v.indexOf('@');
+  if (at > 0) return `${v.slice(0, Math.min(2, at))}${'*'.repeat(3)}${v.slice(at)}`;
+  return v.length <= 3 ? '***' : `${v.slice(0, 2)}${'*'.repeat(3)}${v.slice(-1)}`;
 }
 
 // Секрети ніколи не віддаються списком — тільки через /reveal з аудитом.
@@ -165,9 +280,11 @@ export function sanitize(user, entityKey, row) {
   const ent = entities[entityKey];
   const out = { ...row };
   for (const name of hiddenFields(user, entityKey)) delete out[name];
+  const relatedToUser = row.owner_user_id === user?.id || row.holder_user_id === user?.id;
   for (const f of ent.fields) {
     if (f.type === 'secret' && out[f.name] != null) out[f.name] = '••••••';
     if (f.type === 'password') delete out[f.name];
+    if (f.mask && out[f.name] && !relatedToUser && !capable(user, 'secrets')) out[f.name] = maskValue(out[f.name]);
   }
   delete out.password_hash;
   delete out.totp_secret;

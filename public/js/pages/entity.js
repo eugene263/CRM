@@ -2,6 +2,7 @@
 import { api } from '../api.js';
 import { state, reloadRefs } from '../app.js';
 import { el, money, num, badge, modal, toast } from '../ui.js';
+import { credentialActions } from './vault.js';
 
 const PAGE = 50;
 
@@ -131,7 +132,16 @@ export async function renderEntity(entKey) {
       el('tbody', {}, ...data.rows.map((row) => el('tr', {},
         ...cols.map((f) => el('td', { class: ['money', 'number'].includes(f.type) ? 'num' : '' }, cellValue(f, row))),
         el('td', {},
-          ent.can.update ? el('button', { class: 'btn small', onclick: () => openForm(entKey, row, load) }, '✎') : null,
+          ent.can.update && !ent.readOnlyEntity ? el('button', { class: 'btn small', onclick: () => openForm(entKey, row, load) }, '✎') : null,
+          entKey === 'access_requests' && row.status === 'pending' && (state.caps.settings || state.user.role === 'teamlead') ? el('span', {},
+            el('button', {
+              class: 'btn small', title: 'Схвалити',
+              onclick: async () => { await api.post(`/access_requests/${row.id}/decide`, { approve: true }); toast('Схвалено'); load(); },
+            }, '✅'),
+            el('button', {
+              class: 'btn small danger', style: 'margin-left:6px', title: 'Відхилити',
+              onclick: async () => { await api.post(`/access_requests/${row.id}/decide`, { approve: false }); toast('Відхилено'); load(); },
+            }, '⛔️')) : null,
           ent.can.delete ? el('button', {
             class: 'btn small danger', style: 'margin-left:6px',
             onclick: async () => {
@@ -141,6 +151,18 @@ export async function renderEntity(entKey) {
               load();
             },
           }, '✕') : null,
+          entKey === 'credentials' ? credentialActions(row, load) : null,
+          entKey === 'users' && state.caps.settings && row.status === 'active' ? el('button', {
+            class: 'btn small danger', style: 'margin-left:6px', title: 'Офбординг',
+            onclick: async () => {
+              if (!confirm(`Офбординг ${row.name}?\n\nСесії буде вбито, доступи відкликано й позначено на ротацію, акаунт вимкнено.`)) return;
+              try {
+                const res = await api.post(`/users/${row.id}/offboard`, {});
+                toast(`Відкликано доступів: ${res.revoked}`);
+                load();
+              } catch (e) { toast(e.message, true); }
+            },
+          }, '👋') : null,
           entKey === 'accounts' ? el('button', {
             class: 'btn small', style: 'margin-left:6px',
             onclick: async () => {

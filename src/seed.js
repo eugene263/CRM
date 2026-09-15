@@ -176,6 +176,33 @@ function seedDemo() {
     });
   }
 
+  // Сейф: показуємо всі три режими — звичайний, чутливий і з 2FA-сідом.
+  const vaultOwner = users[7].id;   // фармер тримає ресурсні доступи
+  insert('credentials', {
+    title: 'Firstmail — пул фарму', kind: 'mail', login: 'farm-pool@firstmail.ltd',
+    password_enc: encrypt(`mail-${token(5)}`), service: 'firstmail',
+    owner_user_id: vaultOwner, status: 'stored',
+  });
+  insert('credentials', {
+    title: 'Картка для оплати проксі', kind: 'card', login: '4149 **** **** 8830',
+    password_enc: encrypt('CVV 341, 09/29'), recovery_enc: encrypt('банк: підтвердження по СМС'),
+    sensitivity: 'sensitive', owner_user_id: users[8].id, status: 'stored',
+  });
+  insert('credentials', {
+    title: 'Кабінет LuckyPartners', kind: 'service', login: 'gennect@partner.io',
+    password_enc: encrypt(`pp-${token(5)}`), totp_seed_enc: encrypt('JBSWY3DPEHPK3PXP'),
+    sensitivity: 'sensitive', service: 'LuckyPartners', owner_user_id: users[0].id, status: 'stored',
+  });
+  const walletId = insert('credentials', {
+    title: 'USDT TRC-20 (виплати)', kind: 'wallet', login: 'TKq...9fH',
+    password_enc: encrypt('seed phrase у холодному сховищі'), sensitivity: 'sensitive',
+    owner_user_id: users[8].id, status: 'stored',
+  });
+  insert('access_requests', {
+    credential_id: walletId, user_id: creators[0].id, reason: 'звірити виплату за минулий тиждень',
+    expires_at: null,
+  });
+
   insert('tasks', { title: 'Змонтувати 10 варіантів під Casino X UA', assignee_user_id: users[6].id, creator_user_id: users[1].id, status: 'in_progress', due_date: day(-2) });
   insert('tasks', { title: 'Перезняти хук «скрін виплати»', assignee_user_id: users[6].id, creator_user_id: users[1].id, status: 'todo', due_date: day(-5) });
 

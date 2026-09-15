@@ -6,6 +6,7 @@ import { renderEntity } from './pages/entity.js';
 import { renderAnalytics } from './pages/analytics.js';
 import { renderFinance } from './pages/finance.js';
 import { renderProfile } from './pages/profile.js';
+import { renderRoles } from './pages/roles.js';
 
 export const state = {
   user: null, meta: {}, refs: {}, caps: {},
@@ -81,6 +82,7 @@ function buildNav() {
     { href: '#/dashboard', icon: '📊', label: 'Дашборд', group: 'Огляд' },
     { href: '#/analytics', icon: '🔍', label: 'Аналітика', group: 'Огляд' },
     { href: '#/finance', icon: '💵', label: 'Фінанси', group: 'Огляд' },
+    ...(state.meta.users ? [{ href: '#/roles', icon: '🛡', label: 'Ролі та права', group: 'Огляд' }] : []),
   ];
   for (const ent of Object.values(state.meta)) {
     links.push({ href: `#/e/${ent.key}`, icon: ent.icon || '•', label: ent.label, group: ent.group });
@@ -114,11 +116,12 @@ async function route() {
     else if (section === 'analytics') node = await renderAnalytics();
     else if (section === 'finance') node = await renderFinance();
     else if (section === 'profile') node = await renderProfile();
+    else if (section === 'roles') node = await renderRoles();
     else node = await renderDashboard();
     view.textContent = '';
     view.append(node);
     $('#page-title').textContent = section === 'e' ? (state.meta[arg]?.label || 'Розділ')
-      : { analytics: 'Аналітика', finance: 'Фінанси', profile: 'Профіль' }[section] || 'Дашборд';
+      : { analytics: 'Аналітика', finance: 'Фінанси', profile: 'Профіль', roles: 'Ролі та права' }[section] || 'Дашборд';
   } catch (err) {
     view.textContent = '';
     view.append(el('div', { class: 'card' }, el('div', { class: 'error' }, err.message)));

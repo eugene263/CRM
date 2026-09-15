@@ -250,6 +250,9 @@ CREATE TABLE IF NOT EXISTS clicks (
   click_id TEXT,
   ip_hash TEXT,
   user_agent TEXT,
+  geo TEXT,
+  device TEXT,
+  referer TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_clicks_link ON clicks(tracking_link_id, created_at);
@@ -361,3 +364,81 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+
+-- ── Сейф доступів (vault) ─────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS credentials (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'service',   -- mail|account|card|service|wallet|totp
+  title TEXT NOT NULL,
+  login TEXT,
+  password_enc TEXT,
+  recovery_enc TEXT,
+  totp_seed_enc TEXT,
+  notes_enc TEXT,
+  sensitivity TEXT NOT NULL DEFAULT 'normal',  -- normal|sensitive (картки, гаманці, кабінети)
+  service TEXT,
+  geo TEXT,
+  owner_user_id INTEGER REFERENCES users(id),
+  team_id INTEGER REFERENCES teams(id),
+  holder_user_id INTEGER REFERENCES users(id),
+  resource_type TEXT,
+  resource_id INTEGER,
+  status TEXT NOT NULL DEFAULT 'stored',  -- stored|issued|returned|retired|compromised
+  rotate_required INTEGER NOT NULL DEFAULT 0,
+  last_rotated_at TEXT,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cred_holder ON credentials(holder_user_id);
+CREATE INDEX IF NOT EXISTS idx_cred_status ON credentials(status);
+
+CREATE TABLE IF NOT EXISTS credential_grants (
+  id INTEGER PRIMARY KEY,
+  credential_id INTEGER NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  granted_by INTEGER REFERENCES users(id),
+  granted_at TEXT NOT NULL DEFAULT (datetime('now')),
+  due_at TEXT,
+  returned_at TEXT,
+  state_out TEXT,
+  state_in TEXT,
+  status TEXT NOT NULL DEFAULT 'active',  -- active|returned|revoked|expired
+  note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_grant_cred ON credential_grants(credential_id, status);
+
+CREATE TABLE IF NOT EXISTS access_requests (
+  id INTEGER PRIMARY KEY,
+  credential_id INTEGER NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending|approved|rejected|expired
+  decided_by INTEGER REFERENCES users(id),
+  decided_at TEXT,
+  expires_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_access_req ON access_requests(credential_id, user_id, status);
+
+-- ── Ролі та права у БД (замість захардкоженої матриці) ────────────────────
+CREATE TABLE IF NOT EXISTS roles (
+  key TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  is_system INTEGER NOT NULL DEFAULT 0,
+  can_export INTEGER NOT NULL DEFAULT 0,
+  can_reveal INTEGER NOT NULL DEFAULT 0,
+  can_salary_calc INTEGER NOT NULL DEFAULT 0,
+  can_settings INTEGER NOT NULL DEFAULT 0,
+  reveal_daily_limit INTEGER NOT NULL DEFAULT 20,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  id INTEGER PRIMARY KEY,
+  role_key TEXT NOT NULL REFERENCES roles(key) ON DELETE CASCADE,
+  entity TEXT NOT NULL,
+  level TEXT NOT NULL DEFAULT 'none',     -- none|read|write|full
+  scope TEXT NOT NULL DEFAULT 'all',      -- all|team|own
+  hidden_fields TEXT                      -- через кому
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_role_entity ON role_permissions(role_key, entity);

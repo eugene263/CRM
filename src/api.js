@@ -2,7 +2,11 @@
 // ендпоїнти (дашборд, ЗП, трекінг, постбеки, експорт).
 import { all, get, insert, update, remove, run, audit, setting } from './db.js';
 import { entities } from './entities.js';
-import { can, capable, scopeWhere, scopeOf, ownsRow, sanitize, visibleFields, matrix } from './rbac.js';
+import {
+  can, capable, scopeWhere, scopeOf, ownsRow, sanitize, visibleFields,
+  invalidateRbacCache, roleRow, revealLimit,
+} from './rbac.js';
+import * as vault from './vault.js';
 import { encrypt, decrypt, token, hashIp } from './crypto.js';
 import { hashPassword } from './crypto.js';
 import * as auth from './auth.js';
@@ -140,6 +144,24 @@ const hooks = {
       return data;
     },
   },
+  access_requests: {
+    beforeWrite(user, data, body, { isCreate }) {
+      if (isCreate) {
+        data.user_id = user.id;
+        data.status = 'pending';
+        data.expires_at = new Date(Date.now() + Math.min(Number(body.hours) || 8, 72) * 3600e3)
+          .toISOString().slice(0, 19).replace('T', ' ');
+      }
+      return data;
+    },
+    afterWrite(user, id, data, { isCreate }) {
+      if (!isCreate) return;
+      const cred = get('SELECT title FROM credentials WHERE id=?', data.credential_id);
+      for (const a of all(`SELECT id FROM users WHERE role IN ('owner','head','teamlead') AND status='active'`)) {
+        notify('access', `🙋 ${user.name} просить доступ «${cred?.title ?? data.credential_id}»`, a.id);
+      }
+    },
+  },
   conversions: {
     beforeWrite(user, data, body, { isCreate }) {
       if (isCreate && !data.converted_at) data.converted_at = new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -258,6 +280,11 @@ export async function handleApi(req, res, url) {
       audit({ user_id: user.id, action: '2fa_enable', ip });
       return ok(res, enabled);
     }
+    if (seg[1] === 'sessions' && req.method === 'DELETE' && seg[2]) {
+      const killed = auth.killSession(user.id, seg[2]);
+      audit({ user_id: user.id, action: 'session_kill', entity: 'sessions', payload: { killed }, ip });
+      return ok(res, { killed });
+    }
     if (seg[1] === 'sessions') return ok(res, { rows: auth.sessionsOf(user.id) });
     return fail(res, 404, 'Немає такого ендпоїнта');
   }
@@ -334,6 +361,106 @@ export async function handleApi(req, res, url) {
     return ok(res, result);
   }
 
+  // --- сейф доступів ---
+  if (seg[0] === 'credentials' && seg[1] && seg[2]) {
+    const credId = Number(seg[1]);
+    if (!can(user, 'credentials', 'read')) return fail(res, 403, 'Немає доступу до сейфа');
+    if (seg[2] === 'reveal' && seg[3]) return ok(res, vault.reveal(user, credId, seg[3], ip));
+    if (seg[2] === 'totp') return ok(res, vault.totp(user, credId, ip));
+    if (seg[2] === 'issue' && req.method === 'POST') {
+      if (!can(user, 'credentials', 'update')) return fail(res, 403, 'Немає прав видавати доступи');
+      return ok(res, vault.issue(user, credId, await readBody(req), ip));
+    }
+    if (seg[2] === 'return' && req.method === 'POST') return ok(res, vault.returnBack(user, credId, await readBody(req), ip));
+    if (seg[2] === 'revoke' && req.method === 'POST') {
+      if (!can(user, 'credentials', 'update')) return fail(res, 403, 'Немає прав відкликати доступи');
+      return ok(res, vault.revoke(user, credId, (await readBody(req)).reason, ip));
+    }
+    if (seg[2] === 'grants') {
+      return ok(res, { rows: all('SELECT * FROM credential_grants WHERE credential_id=? ORDER BY granted_at DESC', credId) });
+    }
+  }
+
+  if (seg[0] === 'access_requests' && seg[1] && seg[2] === 'decide' && req.method === 'POST') {
+    if (!capable(user, 'settings') && user.role !== 'teamlead') return fail(res, 403, 'Апрувити доступи може тімлід або вище');
+    const body = await readBody(req);
+    return ok(res, vault.decideAccess(user, Number(seg[1]), !!body.approve, ip));
+  }
+
+  if (seg[0] === 'users' && seg[1] && seg[2] === 'offboard' && req.method === 'POST') {
+    if (!capable(user, 'settings')) return fail(res, 403, 'Офбординг доступний лише власнику/хеду');
+    return ok(res, vault.offboard(user, Number(seg[1]), ip));
+  }
+
+  // --- конструктор ролей ---
+  if (seg[0] === 'roles') {
+    if (req.method === 'GET') {
+      if (!can(user, 'users', 'read')) return fail(res, 403, 'Немає доступу');
+      return ok(res, {
+        roles: all('SELECT * FROM roles ORDER BY key'),
+        permissions: all('SELECT * FROM role_permissions ORDER BY role_key, entity'),
+        entities: Object.fromEntries(Object.entries(entities).map(([k, e]) => [k, { label: e.label, group: e.group, fields: e.fields.map((f) => f.name) }])),
+      });
+    }
+    if (!capable(user, 'settings')) return fail(res, 403, 'Редагувати ролі може лише власник/хед');
+    const body = await readBody(req);
+    if (req.method === 'POST' && !seg[1]) {
+      if (!/^[a-z_]{3,20}$/.test(String(body.key || ''))) return fail(res, 400, 'Ключ ролі: латиниця і підкреслення, 3–20 символів');
+      if (get('SELECT key FROM roles WHERE key=?', body.key)) return fail(res, 409, 'Така роль уже існує');
+      insert('roles', {
+        key: body.key, label: body.label || body.key, is_system: 0,
+        can_export: body.can_export ? 1 : 0, can_reveal: body.can_reveal ? 1 : 0,
+        can_salary_calc: body.can_salary_calc ? 1 : 0, can_settings: body.can_settings ? 1 : 0,
+        reveal_daily_limit: Number(body.reveal_daily_limit ?? 20),
+      });
+      // Нова роль стартує без прав: адміністратор відкриває їх свідомо.
+      for (const entityKey of Object.keys(entities)) {
+        insert('role_permissions', { role_key: body.key, entity: entityKey, level: 'none', scope: 'own', hidden_fields: null });
+      }
+      invalidateRbacCache();
+      audit({ user_id: user.id, action: 'role_create', entity: 'roles', payload: { key: body.key }, ip });
+      return ok(res, { ok: true });
+    }
+    if ((req.method === 'PUT' || req.method === 'PATCH') && seg[1]) {
+      const roleKey = seg[1];
+      if (!get('SELECT key FROM roles WHERE key=?', roleKey)) return fail(res, 404, 'Роль не знайдено');
+      if (roleKey === 'owner') return fail(res, 403, 'Права власника змінювати не можна');
+      const caps = {};
+      for (const c of ['can_export', 'can_reveal', 'can_salary_calc', 'can_settings']) {
+        if (c in body) caps[c] = body[c] ? 1 : 0;
+      }
+      if ('label' in body) caps.label = String(body.label);
+      if ('reveal_daily_limit' in body) caps.reveal_daily_limit = Number(body.reveal_daily_limit);
+      if (Object.keys(caps).length) {
+        run(`UPDATE roles SET ${Object.keys(caps).map((k) => `${k}=?`).join(',')} WHERE key=?`,
+          ...Object.values(caps), roleKey);
+      }
+      for (const p of body.permissions || []) {
+        if (!entities[p.entity]) continue;
+        if (!['none', 'read', 'write', 'full'].includes(p.level) || !['all', 'team', 'own'].includes(p.scope)) {
+          return fail(res, 400, 'Некоректний рівень або скоуп');
+        }
+        run(`INSERT INTO role_permissions (role_key, entity, level, scope, hidden_fields) VALUES (?,?,?,?,?)
+             ON CONFLICT(role_key, entity) DO UPDATE SET level=excluded.level, scope=excluded.scope, hidden_fields=excluded.hidden_fields`,
+          roleKey, p.entity, p.level, p.scope, (p.hidden_fields || []).join(',') || null);
+      }
+      invalidateRbacCache();
+      audit({ user_id: user.id, action: 'role_update', entity: 'roles', payload: { role: roleKey, changed: (body.permissions || []).length }, ip });
+      return ok(res, { ok: true });
+    }
+    if (req.method === 'DELETE' && seg[1]) {
+      const role = get('SELECT * FROM roles WHERE key=?', seg[1]);
+      if (!role) return fail(res, 404, 'Роль не знайдено');
+      if (role.is_system) return fail(res, 403, 'Системну роль видалити не можна');
+      if (get('SELECT id FROM users WHERE role=? LIMIT 1', seg[1])) return fail(res, 409, 'Роль призначена користувачам');
+      run('DELETE FROM role_permissions WHERE role_key=?', seg[1]);
+      run('DELETE FROM roles WHERE key=?', seg[1]);
+      invalidateRbacCache();
+      audit({ user_id: user.id, action: 'role_delete', entity: 'roles', payload: { key: seg[1] }, ip });
+      return ok(res, { ok: true });
+    }
+  }
+
   // --- генерик CRUD ---
   const entKey = seg[0];
   const ent = entities[entKey];
@@ -369,8 +496,10 @@ export async function handleApi(req, res, url) {
     if (!field) return fail(res, 404, 'Поле не знайдено');
     const row = get(`SELECT * FROM ${ent.table} WHERE id=?`, id);
     if (!row || !ownsRow(user, entKey, row)) return fail(res, 404, 'Запис не знайдено');
+    const budget = vault.checkRevealBudget(user);
     audit({ user_id: user.id, action: 'reveal', entity: entKey, entity_id: id, payload: { field: field.name }, ip });
-    return ok(res, { value: decrypt(row[field.name]) });
+    vault.noteReveal(user);
+    return ok(res, { value: decrypt(row[field.name]), used: budget.used + 1, limit: budget.limit });
   }
 
   // /api/:entity/:id/history — журнал для акаунта
@@ -446,6 +575,7 @@ function permissionsFor(user) {
 const capsOf = (user) => ({
   secrets: capable(user, 'secrets'), export: capable(user, 'export'),
   salary_calc: capable(user, 'salary_calc'), settings: capable(user, 'settings'),
+  reveal_daily_limit: revealLimit(user),
 });
 
 // CSV: converted_at,event,status,payout,offer_id,account_id,creative_id,user_id,external_id
@@ -488,9 +618,14 @@ export function handleRedirect(req, res, url) {
   const link = get('SELECT * FROM tracking_links WHERE slug=?', slug);
   if (!link) return fail(res, 404, 'Лінк не знайдено');
   const clickId = token(10);
+  const ua = String(req.headers['user-agent'] || '').slice(0, 300);
   insert('clicks', {
     tracking_link_id: link.id, click_id: clickId,
-    ip_hash: hashIp(clientIp(req)), user_agent: String(req.headers['user-agent'] || '').slice(0, 300),
+    ip_hash: hashIp(clientIp(req)), user_agent: ua,
+    // Гео дає CDN/проксі (Cloudflare, Railway); девайс і реферер — з заголовків.
+    geo: String(req.headers['cf-ipcountry'] || req.headers['x-vercel-ip-country'] || '').slice(0, 2) || null,
+    device: /iPhone|iPad|Android|Mobile/i.test(ua) ? 'mobile' : 'desktop',
+    referer: String(req.headers.referer || '').slice(0, 300) || null,
   });
   run('UPDATE tracking_links SET clicks = clicks + 1 WHERE id=?', link.id);
   if (link.post_id) run('UPDATE posts SET clicks = clicks + 1 WHERE id=?', link.post_id);

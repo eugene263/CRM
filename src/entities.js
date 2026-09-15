@@ -329,7 +329,83 @@ export const entities = {
     ],
   },
 
+  // ── Сейф доступів ──────────────────────────────────────────────────────
+  credentials: {
+    // «Свої» для сейфа — це видані на руки, а не створені: крієйтор має
+    // бачити рівно те, що йому виписали.
+    label: 'Сейф доступів', group: 'Доступи', icon: '🔐', ownField: 'holder_user_id', teamField: 'team_id', title: 'title',
+    fields: [
+      { name: 'title', label: 'Назва', type: 'text', required: true, list: true },
+      { name: 'kind', label: 'Тип', type: 'select', required: true, list: true, options: S(
+        ['mail', 'Пошта'], ['account', 'Акаунт'], ['card', 'Картка'], ['service', 'Сервіс'],
+        ['wallet', 'Гаманець'], ['totp', '2FA-сід']) },
+      { name: 'login', label: 'Логін', type: 'text', list: true, mask: 'partial' },
+      { name: 'password_enc', label: 'Пароль', type: 'secret' },
+      { name: 'recovery_enc', label: 'Recovery-дані', type: 'secret' },
+      { name: 'totp_seed_enc', label: '2FA seed', type: 'secret', hint: 'CRM сама видасть код — не треба гнати 2FA в Telegram' },
+      { name: 'notes_enc', label: 'Закриті нотатки', type: 'secret' },
+      { name: 'sensitivity', label: 'Чутливість', type: 'select', list: true, options: S(
+        ['normal', 'Звичайна'], ['sensitive', 'Чутлива (потрібен апрув)']) },
+      { name: 'service', label: 'Сервіс', type: 'text', list: true },
+      { name: 'geo', label: 'Гео', type: 'text' },
+      { name: 'owner_user_id', label: 'Власник ресурсу', type: 'ref', ref: 'users', list: true },
+      { name: 'team_id', label: 'Команда', type: 'ref', ref: 'teams' },
+      { name: 'holder_user_id', label: 'На руках у', type: 'ref', ref: 'users', list: true, readOnly: true },
+      { name: 'resource_type', label: 'Тип ресурсу', type: 'text' },
+      { name: 'resource_id', label: 'ID ресурсу', type: 'number' },
+      { name: 'status', label: 'Статус', type: 'select', list: true, options: S(
+        ['stored', 'На складі'], ['issued', 'Видано'], ['returned', 'Повернено'],
+        ['retired', 'Списано'], ['compromised', 'Скомпрометовано']) },
+      { name: 'rotate_required', label: 'Потребує ротації', type: 'number', list: true, readOnly: true },
+      { name: 'last_rotated_at', label: 'Остання ротація', type: 'date' },
+      { name: 'note', label: 'Нотатка', type: 'textarea' },
+    ],
+  },
+  credential_grants: {
+    label: 'Видача доступів', group: 'Доступи', icon: '🪪', ownField: 'user_id', defaultSort: 'granted_at DESC',
+    readOnlyEntity: true,
+    fields: [
+      { name: 'credential_id', label: 'Доступ', type: 'ref', ref: 'credentials', list: true },
+      { name: 'user_id', label: 'Кому', type: 'ref', ref: 'users', list: true },
+      { name: 'granted_by', label: 'Хто видав', type: 'ref', ref: 'users', list: true },
+      { name: 'granted_at', label: 'Видано', type: 'datetime', list: true },
+      { name: 'due_at', label: 'Повернути до', type: 'datetime', list: true },
+      { name: 'returned_at', label: 'Повернено', type: 'datetime', list: true },
+      { name: 'state_out', label: 'Стан при видачі', type: 'text' },
+      { name: 'state_in', label: 'Стан при поверненні', type: 'text' },
+      { name: 'status', label: 'Статус', type: 'select', list: true, options: S(
+        ['active', 'На руках'], ['returned', 'Повернено'], ['revoked', 'Відкликано'], ['expired', 'Протерміновано']) },
+      { name: 'note', label: 'Нотатка', type: 'text' },
+    ],
+  },
+  access_requests: {
+    label: 'Запити на доступ', group: 'Доступи', icon: '🙋', ownField: 'user_id', defaultSort: 'created_at DESC',
+    fields: [
+      { name: 'credential_id', label: 'Доступ', type: 'ref', ref: 'credentials', required: true, list: true },
+      { name: 'user_id', label: 'Хто просить', type: 'ref', ref: 'users', list: true, readOnly: true },
+      { name: 'reason', label: 'Навіщо', type: 'textarea', required: true },
+      { name: 'status', label: 'Статус', type: 'select', list: true, readOnly: true, options: S(
+        ['pending', 'Очікує'], ['approved', 'Схвалено'], ['rejected', 'Відхилено'], ['expired', 'Протерміновано']) },
+      { name: 'decided_by', label: 'Рішення від', type: 'ref', ref: 'users', list: true, readOnly: true },
+      { name: 'expires_at', label: 'Діє до', type: 'datetime', list: true, readOnly: true },
+      { name: 'created_at', label: 'Створено', type: 'datetime', list: true, readOnly: true },
+    ],
+  },
+
   // ── Службові ───────────────────────────────────────────────────────────
+  clicks: {
+    label: 'Кліки', group: 'Службові', icon: '🖱', readOnlyEntity: true, defaultSort: 'created_at DESC',
+    fields: [
+      { name: 'created_at', label: 'Коли', type: 'datetime', list: true },
+      { name: 'tracking_link_id', label: 'Лінк', type: 'ref', ref: 'tracking_links', list: true },
+      { name: 'click_id', label: 'Click ID', type: 'text', list: true },
+      { name: 'geo', label: 'Гео', type: 'text', list: true },
+      { name: 'device', label: 'Девайс', type: 'text', list: true },
+      { name: 'referer', label: 'Реферер', type: 'text', list: true },
+      { name: 'ip_hash', label: 'IP (хеш)', type: 'text' },
+      { name: 'user_agent', label: 'User-Agent', type: 'text' },
+    ],
+  },
   account_events: {
     label: 'Історія акаунтів', group: 'Службові', icon: '🕓', defaultSort: 'created_at DESC',
     fields: [
