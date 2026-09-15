@@ -3,8 +3,8 @@
 import { get, insert } from './db.js';
 import { hashPassword } from './crypto.js';
 
-export function bootstrapOwner() {
-  if (get('SELECT id FROM users LIMIT 1')) return null;
+export async function bootstrapOwner() {
+  if (await get('SELECT id FROM users LIMIT 1')) return null;
   const email = process.env.CRM_ADMIN_EMAIL;
   const password = process.env.CRM_ADMIN_PASSWORD;
   if (!email || !password) {
@@ -12,7 +12,7 @@ export function bootstrapOwner() {
     console.warn('   Задайте змінні й перезапустіть, або виконайте: node src/seed.js --admin');
     return null;
   }
-  const id = insert('users', {
+  const id = await insert('users', {
     email, name: process.env.CRM_ADMIN_NAME || 'Власник', role: 'owner',
     password_hash: hashPassword(password), status: 'active',
   });

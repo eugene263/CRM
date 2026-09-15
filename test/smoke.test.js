@@ -6,10 +6,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// Той самий набір ганяється на обох двигунах: без CRM_TEST_DATABASE_URL —
+// SQLite, з нею — Postgres (npm run test:pg).
+const PG_URL = process.env.CRM_TEST_DATABASE_URL || '';
 const dbFile = path.join(os.tmpdir(), `crm-test-${Date.now()}.db`);
 const PORT = 3400 + Math.floor(Math.random() * 300);
 const BASE = `http://127.0.0.1:${PORT}`;
-const env = { ...process.env, CRM_DB: dbFile, CRM_PORT: String(PORT), CRM_POSTBACK_PORT: String(PORT + 1), CRM_SECRET_KEY: 'a'.repeat(64), CRM_TICK_MS: '3600000' };
+const env = {
+  ...process.env,
+  CRM_PORT: String(PORT), CRM_POSTBACK_PORT: String(PORT + 1),
+  CRM_SECRET_KEY: 'a'.repeat(64), CRM_TICK_MS: '3600000',
+  ...(PG_URL ? { CRM_DATABASE_URL: PG_URL } : { CRM_DB: dbFile }),
+};
 let server;
 
 const jar = {};
@@ -51,8 +59,10 @@ before(async () => {
 
 after(() => {
   server?.kill();
-  fs.rmSync(dbFile, { force: true });
-  for (const suffix of ['-wal', '-shm']) fs.rmSync(dbFile + suffix, { force: true });
+  if (!PG_URL) {
+    fs.rmSync(dbFile, { force: true });
+    for (const suffix of ['-wal', '-shm']) fs.rmSync(dbFile + suffix, { force: true });
+  }
 });
 
 test('без сесії API закритий', async () => {

@@ -125,28 +125,32 @@ export const ROLE_LABELS = {
 };
 
 // ── Шар БД ────────────────────────────────────────────────────────────────
-let cache = null;
+let cache = new Map();
 
-export function invalidateRbacCache() { cache = null; }
-
-function loadCache() {
-  if (cache) return cache;
+// Права читаються з БД один раз на старт і після кожної зміни ролей:
+// самі перевірки (can/scopeOf/hiddenFields) мають лишатись синхронними,
+// бо викликаються десятки разів на кожен запит.
+export async function refreshRbac() {
   const roles = new Map();
-  for (const r of all('SELECT * FROM roles')) roles.set(r.key, { ...r, perms: new Map() });
-  for (const p of all('SELECT * FROM role_permissions')) {
+  for (const r of await all('SELECT * FROM roles')) roles.set(r.key, { ...r, perms: new Map() });
+  for (const p of await all('SELECT * FROM role_permissions')) {
     roles.get(p.role_key)?.perms.set(p.entity, p);
   }
   cache = roles;
   return cache;
 }
 
+export const invalidateRbacCache = refreshRbac;
+
+const loadCache = () => cache;
+
 // Первинне наповнення: дефолти з коду → БД. Наявні рядки не чіпаємо.
-export function seedRoles() {
-  if (get('SELECT key FROM roles LIMIT 1')) return { seeded: 0 };
+export async function seedRoles() {
+  if (await get('SELECT key FROM roles LIMIT 1')) { await refreshRbac(); return { seeded: 0 }; }
   let seeded = 0;
   for (const [key, label] of Object.entries(ROLE_LABELS)) {
     const caps = CAPS[key] || [];
-    run(`INSERT INTO roles (key, label, is_system, can_export, can_reveal, can_salary_calc, can_settings, reveal_daily_limit)
+    await run(`INSERT INTO roles (key, label, is_system, can_export, can_reveal, can_salary_calc, can_settings, reveal_daily_limit)
          VALUES (?,?,1,?,?,?,?,?)`,
       key, label,
       caps.includes('export') ? 1 : 0, caps.includes('secrets') ? 1 : 0,
@@ -155,33 +159,33 @@ export function seedRoles() {
     for (const entityKey of Object.keys(entities)) {
       const r = defaultRule(key, entityKey);
       const hidden = entities[entityKey].fields.filter((f) => (f.hideFor || []).includes(key)).map((f) => f.name);
-      insert('role_permissions', {
+      await insert('role_permissions', {
         role_key: key, entity: entityKey, level: r.level, scope: r.scope,
         hidden_fields: hidden.join(',') || null,
       });
     }
     seeded += 1;
   }
-  invalidateRbacCache();
+  await refreshRbac();
   return { seeded };
 }
 
 // Права для сутностей, доданих після сідингу (нові модулі в оновленні).
-export function syncNewEntities() {
-  const known = new Set(all('SELECT DISTINCT entity FROM role_permissions').map((r) => r.entity));
+export async function syncNewEntities() {
+  const known = new Set((await all('SELECT DISTINCT entity FROM role_permissions')).map((r) => r.entity));
   const missing = Object.keys(entities).filter((k) => !known.has(k));
   if (!missing.length) return { added: 0 };
-  for (const role of all('SELECT key FROM roles')) {
+  for (const role of await all('SELECT key FROM roles')) {
     for (const entityKey of missing) {
       const r = defaultRule(role.key, entityKey);
       const hidden = entities[entityKey].fields.filter((f) => (f.hideFor || []).includes(role.key)).map((f) => f.name);
-      insert('role_permissions', {
+      await insert('role_permissions', {
         role_key: role.key, entity: entityKey, level: r.level, scope: r.scope,
         hidden_fields: hidden.join(',') || null,
       });
     }
   }
-  invalidateRbacCache();
+  await refreshRbac();
   return { added: missing.length };
 }
 

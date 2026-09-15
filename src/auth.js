@@ -6,42 +6,42 @@ import { clientIp, cookies } from './http.js';
 const SESSION_DAYS = Number(process.env.CRM_SESSION_DAYS || 7);
 export const COOKIE = 'crm_session';
 
-export function login({ email, password, totp, ip, userAgent }) {
-  const user = get('SELECT * FROM users WHERE lower(email)=lower(?)', String(email || '').trim());
+export async function login({ email, password, totp, ip, userAgent }) {
+  const user = await get('SELECT * FROM users WHERE lower(email)=lower(?)', String(email || '').trim());
   if (!user || user.status !== 'active' || !verifyPassword(password, user.password_hash)) {
-    audit({ action: 'login_failed', entity: 'users', payload: { email }, ip });
+    await audit({ action: 'login_failed', entity: 'users', payload: { email }, ip });
     return { error: 'Невірний email або пароль' };
   }
   if (user.totp_secret && !verifyTotp(user.totp_secret, totp)) {
-    audit({ user_id: user.id, action: 'login_failed_2fa', entity: 'users', entity_id: user.id, ip });
+    await audit({ user_id: user.id, action: 'login_failed_2fa', entity: 'users', entity_id: user.id, ip });
     return { error: 'Невірний код 2FA', need2fa: true };
   }
   const t = token();
-  insert('sessions', {
+  await insert('sessions', {
     token: t, user_id: user.id, ip, user_agent: String(userAgent || '').slice(0, 300),
     expires_at: new Date(Date.now() + SESSION_DAYS * 864e5).toISOString(),
   });
-  audit({ user_id: user.id, action: 'login', entity: 'users', entity_id: user.id, ip });
+  await audit({ user_id: user.id, action: 'login', entity: 'users', entity_id: user.id, ip });
   return { token: t, user: publicUser(user) };
 }
 
-export function logout(t, userId, ip) {
-  run('DELETE FROM sessions WHERE token=?', t);
-  audit({ user_id: userId, action: 'logout', ip });
+export async function logout(t, userId, ip) {
+  await run('DELETE FROM sessions WHERE token=?', t);
+  await audit({ user_id: userId, action: 'logout', ip });
 }
 
-export function userFromRequest(req) {
+export async function userFromRequest(req) {
   const jar = cookies(req);
   const header = String(req.headers.authorization || '');
   const t = jar[COOKIE] || (header.startsWith('Bearer ') ? header.slice(7) : null);
   if (!t) return null;
-  const session = get('SELECT * FROM sessions WHERE token=?', t);
+  const session = await get('SELECT * FROM sessions WHERE token=?', t);
   if (!session) return null;
   if (new Date(session.expires_at) < new Date()) {
-    run('DELETE FROM sessions WHERE token=?', t);
+    await run('DELETE FROM sessions WHERE token=?', t);
     return null;
   }
-  const user = get('SELECT * FROM users WHERE id=?', session.user_id);
+  const user = await get('SELECT * FROM users WHERE id=?', session.user_id);
   if (!user || user.status !== 'active') return null;
   user.session_token = t;
   return user;
@@ -59,28 +59,28 @@ export function sessionCookie(t, maxAgeDays = SESSION_DAYS) {
 
 export const clearCookie = () => `${COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
 
-export function setPassword(userId, password) {
-  run('UPDATE users SET password_hash=? WHERE id=?', hashPassword(password), userId);
+export async function setPassword(userId, password) {
+  await run('UPDATE users SET password_hash=? WHERE id=?', hashPassword(password), userId);
 }
 
-export function enable2fa(userId) {
+export async function enable2fa(userId) {
   const secret = totpSecret();
-  run('UPDATE users SET totp_secret=? WHERE id=?', secret, userId);
-  const user = get('SELECT email FROM users WHERE id=?', userId);
+  await run('UPDATE users SET totp_secret=? WHERE id=?', secret, userId);
+  const user = await get('SELECT email FROM users WHERE id=?', userId);
   return { secret, uri: `otpauth://totp/GennectCRM:${encodeURIComponent(user.email)}?secret=${secret}&issuer=GennectCRM` };
 }
 
-export function disable2fa(userId) {
-  run('UPDATE users SET totp_secret=NULL WHERE id=?', userId);
+export async function disable2fa(userId) {
+  await run('UPDATE users SET totp_secret=NULL WHERE id=?', userId);
 }
 
 // Примусове завершення сесії: тільки своєї (чужі — через офбординг).
-export function killSession(userId, token) {
-  return Number(run('DELETE FROM sessions WHERE user_id=? AND token=?', userId, token).changes);
+export async function killSession(userId, token) {
+  return Number((await run('DELETE FROM sessions WHERE user_id=? AND token=?', userId, token)).changes);
 }
 
-export function sessionsOf(userId) {
-  return all('SELECT token, ip, user_agent, created_at, expires_at FROM sessions WHERE user_id=?', userId);
+export async function sessionsOf(userId) {
+  return await all('SELECT token, ip, user_agent, created_at, expires_at FROM sessions WHERE user_id=?', userId);
 }
 
 export { clientIp };

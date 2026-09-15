@@ -8,12 +8,12 @@ const bounds = (period) => {
   return { from, to, toEnd: `${to} 23:59:59` };
 };
 
-export function ruleFor(user, period) {
+export async function ruleFor(user, period) {
   const { to } = bounds(period);
-  return get(
+  return await get(
     `SELECT * FROM salary_rules WHERE user_id=? AND date(active_from)<=date(?)
       ORDER BY date(active_from) DESC LIMIT 1`, user.id, to)
-    || get(
+    || await get(
     `SELECT * FROM salary_rules WHERE user_id IS NULL AND role=? AND date(active_from)<=date(?)
       ORDER BY date(active_from) DESC LIMIT 1`, user.role, to)
     || null;
@@ -38,37 +38,37 @@ function scopeSql(user) {
   return { conv: '1=1', exp: '1=1', post: '1=1', params: [], expParams: [], postParams: [] };
 }
 
-export function userStats(userId, period) {
+export async function userStats(userId, period) {
   const { from, to, toEnd } = bounds(period);
-  const user = get('SELECT id, role, team_id FROM users WHERE id=?', userId);
+  const user = await get('SELECT id, role, team_id FROM users WHERE id=?', userId);
   const sc = scopeSql(user);
   const convParams = sc.params.filter((v) => v !== undefined);
   const expParams = (sc.expParams ?? sc.params).filter((v) => v !== undefined);
   const postParams = (sc.postParams ?? sc.params).filter((v) => v !== undefined);
-  const rev = get(
+  const rev = await get(
     `SELECT COALESCE(SUM(c.payout),0) AS revenue,
             SUM(CASE WHEN c.event='dep' THEN 1 ELSE 0 END) AS deps
        FROM conversions c
       WHERE ${sc.conv} AND c.status IN ('approved','paid') AND c.converted_at BETWEEN ? AND ?`,
     ...convParams, from, toEnd) || { revenue: 0, deps: 0 };
-  const exp = get(
+  const exp = await get(
     `SELECT COALESCE(SUM(e.amount),0) AS expenses FROM expenses e
       WHERE ${sc.exp} AND e.category<>'salary' AND e.spent_at BETWEEN ? AND ?`, ...expParams, from, to) || { expenses: 0 };
-  const posts = get(
+  const posts = await get(
     `SELECT COUNT(*) AS posts FROM posts p WHERE ${sc.post} AND p.posted_at BETWEEN ? AND ?`, ...postParams, from, toEnd) || { posts: 0 };
   const revenue = Number(rev.revenue || 0);
   const expenses = Number(exp.expenses || 0);
   return { revenue, expenses, profit: revenue - expenses, deps: Number(rev.deps || 0), posts: Number(posts.posts || 0) };
 }
 
-export function calcSalary(period, { commit = false, actorId = null } = {}) {
+export async function calcSalary(period, { commit = false, actorId = null } = {}) {
   if (!/^\d{4}-\d{2}$/.test(String(period || ''))) throw Object.assign(new Error('period має бути YYYY-MM'), { status: 400 });
-  const users = all(`SELECT * FROM users WHERE status='active'`);
+  const users = await all(`SELECT * FROM users WHERE status='active'`);
   const rows = [];
   for (const u of users) {
-    const rule = ruleFor(u, period);
+    const rule = await ruleFor(u, period);
     if (!rule) continue;
-    const stats = userStats(u.id, period);
+    const stats = await userStats(u.id, period);
     const fix = Number(rule.fix_amount || 0);
     const percent = Math.max(0, stats.profit) * (Number(rule.percent_of_profit || 0) / 100);
     let bonus = 0;
@@ -85,36 +85,36 @@ export function calcSalary(period, { commit = false, actorId = null } = {}) {
     rows.push(row);
 
     if (commit) {
-      const existing = get('SELECT * FROM payouts WHERE user_id=? AND period=?', u.id, period);
+      const existing = await get('SELECT * FROM payouts WHERE user_id=? AND period=?', u.id, period);
       if (existing && existing.status === 'paid') { row.skipped = 'вже виплачено'; continue; }
       if (existing) {
-        run(`UPDATE payouts SET fix_amount=?, percent_amount=?, bonus_amount=?, total=?, status='accrued' WHERE id=?`,
+        await run(`UPDATE payouts SET fix_amount=?, percent_amount=?, bonus_amount=?, total=?, status='accrued' WHERE id=?`,
           fix, row.percent_amount, bonus, total, existing.id);
         row.payout_id = existing.id;
       } else {
-        row.payout_id = insert('payouts', {
+        row.payout_id = await insert('payouts', {
           user_id: u.id, period, fix_amount: fix, percent_amount: row.percent_amount,
           bonus_amount: bonus, total, status: 'accrued',
         });
       }
     }
   }
-  if (commit) audit({ user_id: actorId, action: 'salary_calc', entity: 'payouts', payload: { period, users: rows.length } });
+  if (commit) await audit({ user_id: actorId, action: 'salary_calc', entity: 'payouts', payload: { period, users: rows.length } });
   return { period, rows, total: Math.round(rows.reduce((s, r) => s + r.total, 0) * 100) / 100, committed: commit };
 }
 
-export function pnl(period) {
+export async function pnl(period) {
   const { from, to, toEnd } = bounds(period);
-  const revenue = Number(get(
+  const revenue = Number(await get(
     `SELECT COALESCE(SUM(payout),0) AS v FROM conversions
       WHERE status IN ('approved','paid') AND converted_at BETWEEN ? AND ?`, from, toEnd)?.v || 0);
-  const hold = Number(get(
+  const hold = Number(await get(
     `SELECT COALESCE(SUM(payout),0) AS v FROM conversions
       WHERE status='hold' AND converted_at BETWEEN ? AND ?`, from, toEnd)?.v || 0);
-  const byCategory = all(
+  const byCategory = await all(
     `SELECT category, COALESCE(SUM(amount),0) AS amount FROM expenses
       WHERE spent_at BETWEEN ? AND ? GROUP BY category ORDER BY amount DESC`, from, to);
-  const salary = Number(get(
+  const salary = Number(await get(
     `SELECT COALESCE(SUM(total),0) AS v FROM payouts WHERE period=? AND status<>'canceled'`, period)?.v || 0);
   const expenses = byCategory.reduce((s, r) => s + Number(r.amount), 0);
   const profit = revenue - expenses - salary;

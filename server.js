@@ -1,5 +1,7 @@
 // Точка входу: адмінка + API (порт CRM_PORT) і окремий легкий сервіс постбеків
 // (порт CRM_POSTBACK_PORT) — щоб сплеск конверсій не клав інтерфейс.
+// CRM_ROLE=postback піднімає лише приймання конверсій: на PaaS це окремий
+// сервіс із тією ж базою, який переживає деплой адмінки.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,12 +9,13 @@ import { fileURLToPath } from 'node:url';
 import { handleApi, handleRedirect, handlePostback } from './src/api.js';
 import { fail, send } from './src/http.js';
 import { flushQueue, runChecks } from './src/telegram.js';
-import { dbFile } from './src/db.js';
+import { dbFile, engine, initSchema } from './src/db.js';
 import { bootstrapOwner } from './src/bootstrap.js';
 import { migrate } from './src/migrate.js';
 import { seedRoles, syncNewEntities } from './src/rbac.js';
 import { expireOverdue } from './src/vault.js';
 import { backupDatabase } from './src/backup.js';
+import { captureError, installGlobalHandlers } from './src/errors.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, 'public');
@@ -44,13 +47,13 @@ const app = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   try {
     if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
-    if (url.pathname.startsWith('/r/')) return handleRedirect(req, res, url);
-    if (url.pathname.startsWith('/pb/')) return handlePostback(req, res, url);
+    if (url.pathname.startsWith('/r/')) return await handleRedirect(req, res, url);
+    if (url.pathname.startsWith('/pb/')) return await handlePostback(req, res, url);
     if (url.pathname === '/health') return send(res, 200, { ok: true });
     return serveStatic(req, res, url);
   } catch (e) {
     const status = e.status || 500;
-    if (status >= 500) console.error('[crm]', e);
+    if (status >= 500) await captureError(e, { route: url.pathname, method: req.method });
     // Підказки для інтерфейсу: чому саме відмовлено — щоб показати кнопку
     // «запросити доступ», а не просто червоний тост.
     const hints = {};
@@ -59,28 +62,31 @@ const app = http.createServer(async (req, res) => {
   }
 });
 
-const postbackApp = http.createServer((req, res) => {
+const postbackApp = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   try {
-    if (url.pathname.startsWith('/pb/')) return handlePostback(req, res, url);
-    if (url.pathname.startsWith('/r/')) return handleRedirect(req, res, url);
+    if (url.pathname.startsWith('/pb/')) return await handlePostback(req, res, url);
+    if (url.pathname.startsWith('/r/')) return await handleRedirect(req, res, url);
     if (url.pathname === '/health') return send(res, 200, { ok: true });
     return send(res, 404, 'Not found');
   } catch (e) {
-    console.error('[postback]', e);
+    await captureError(e, { route: url.pathname, logger: 'postback' });
     return fail(res, e.status || 500, e.message || 'error');
   }
 });
 
-migrate();
-seedRoles();
-syncNewEntities();
-bootstrapOwner();
+// Порядок важливий: схема → міграції → ролі → власник.
+installGlobalHandlers();
+await initSchema();
+await migrate();
+await seedRoles();
+await syncNewEntities();
+await bootstrapOwner();
 
 if (process.env.CRM_ROLE !== 'postback') {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`CRM:      http://localhost:${PORT}`);
-    console.log(`БД:       ${dbFile}`);
+    console.log(`БД:       ${engine} · ${dbFile}`);
     if (!process.env.CRM_SECRET_KEY) console.warn('⚠️  CRM_SECRET_KEY не заданий — секрети шифруються dev-ключем. Для проду задайте 32-байтовий hex.');
   });
 }
@@ -93,11 +99,11 @@ if (PB_PORT > 0) {
 // Фонові перевірки й розсилка (аналог BullMQ-воркера на малому масштабі).
 const tick = async () => {
   try {
-    runChecks();
-    expireOverdue();       // протерміновані видачі доступів
-    backupDatabase();      // добова копія бази поруч із самою базою на томі
+    await runChecks();
+    await expireOverdue();       // протерміновані видачі доступів
+    await backupDatabase();      // добова копія бази поруч із самою базою на томі
     await flushQueue();
-  } catch (e) { console.error('[worker]', e.message); }
+  } catch (e) { await captureError(e, { logger: 'worker' }); }
 };
 setInterval(tick, Number(process.env.CRM_TICK_MS || 15 * 60_000)).unref();
 setTimeout(tick, 5_000).unref();
