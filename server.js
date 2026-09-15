@@ -8,11 +8,17 @@ import { handleApi, handleRedirect, handlePostback } from './src/api.js';
 import { fail, send } from './src/http.js';
 import { flushQueue, runChecks } from './src/telegram.js';
 import { dbFile } from './src/db.js';
+import { bootstrapOwner } from './src/bootstrap.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, 'public');
-const PORT = Number(process.env.CRM_PORT || 3000);
-const PB_PORT = Number(process.env.CRM_POSTBACK_PORT || PORT + 1);
+// На PaaS (Railway/Render/Fly) назовні видно рівно один порт — його дає PORT.
+// Тоді постбеки обслуговує основний процес (той самий /pb і /r), а окремий
+// лістенер не піднімається: CRM_POSTBACK_PORT=0 вимикає його явно.
+const PORT = Number(process.env.CRM_PORT || process.env.PORT || 3000);
+const PB_PORT = process.env.CRM_POSTBACK_PORT !== undefined
+  ? Number(process.env.CRM_POSTBACK_PORT)
+  : (process.env.PORT ? 0 : PORT + 1);
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json' };
 
@@ -58,14 +64,20 @@ const postbackApp = http.createServer((req, res) => {
   }
 });
 
+bootstrapOwner();
+
 if (process.env.CRM_ROLE !== 'postback') {
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`CRM:      http://localhost:${PORT}`);
     console.log(`БД:       ${dbFile}`);
     if (!process.env.CRM_SECRET_KEY) console.warn('⚠️  CRM_SECRET_KEY не заданий — секрети шифруються dev-ключем. Для проду задайте 32-байтовий hex.');
   });
 }
-postbackApp.listen(PB_PORT, () => console.log(`Postback: http://localhost:${PB_PORT}/pb/<token>`));
+if (PB_PORT > 0) {
+  postbackApp.listen(PB_PORT, '0.0.0.0', () => console.log(`Postback: http://localhost:${PB_PORT}/pb/<token>`));
+} else {
+  console.log('Postback: обслуговується основним процесом на /pb/<token>');
+}
 
 // Фонові перевірки й розсилка (аналог BullMQ-воркера на малому масштабі).
 const tick = async () => {
