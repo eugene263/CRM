@@ -6,19 +6,26 @@ services:
       - "3000:3000"     # адмінка — тримайте за VPN/IP-whitelist на nginx
       - "3001:3001"     # постбеки — єдиний публічний порт
     environment:
+      CRM_DB: /data/crm.db
       CRM_SECRET_KEY: ${CRM_SECRET_KEY:?задайте 32-байтовий hex}
       CRM_SECURE_COOKIE: "1"
       CRM_TELEGRAM_TOKEN: ${CRM_TELEGRAM_TOKEN:-}
       CRM_TELEGRAM_CHAT_ID: ${CRM_TELEGRAM_CHAT_ID:-}
     volumes:
       - crm-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 30s
 
   backup:
     image: alpine:3.20
     restart: unless-stopped
     depends_on: [crm]
     volumes:
-      - crm-data:/data:ro
+      - crm-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 30s:ro
       - ./backups:/backups
     command: >
       sh -c "while true; do
