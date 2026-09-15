@@ -23,10 +23,14 @@ const PUBLIC = path.join(here, 'public');
 // На PaaS (Railway/Render/Fly) назовні видно рівно один порт — його дає PORT.
 // Тоді постбеки обслуговує основний процес (той самий /pb і /r), а окремий
 // лістенер не піднімається: CRM_POSTBACK_PORT=0 вимикає його явно.
+const ROLE = process.env.CRM_ROLE || 'web';
 const PORT = Number(process.env.CRM_PORT || process.env.PORT || 3000);
-const PB_PORT = process.env.CRM_POSTBACK_PORT !== undefined
-  ? Number(process.env.CRM_POSTBACK_PORT)
-  : (process.env.PORT ? 0 : PORT + 1);
+// У ролі postback єдиний порт хостингу слухає саме приймання конверсій.
+// У ролі web на PaaS окремий лістенер не потрібен — /pb і /r обслуговує
+// основний процес; локально ж він піднімається поруч, на PORT + 1.
+const PB_PORT = ROLE === 'postback'
+  ? PORT
+  : (process.env.CRM_POSTBACK_PORT ? Number(process.env.CRM_POSTBACK_PORT) : (process.env.PORT ? 0 : PORT + 1));
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json' };
 
@@ -86,7 +90,7 @@ await syncNewEntities();
 await seedProspecting();
 await bootstrapOwner();
 
-if (process.env.CRM_ROLE !== 'postback') {
+if (ROLE !== 'postback') {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`CRM:      http://localhost:${PORT}`);
     console.log(`БД:       ${engine} · ${dbFile}`);
@@ -94,12 +98,13 @@ if (process.env.CRM_ROLE !== 'postback') {
   });
 }
 if (PB_PORT > 0) {
-  postbackApp.listen(PB_PORT, '0.0.0.0', () => console.log(`Postback: http://localhost:${PB_PORT}/pb/<token>`));
+  postbackApp.listen(PB_PORT, '0.0.0.0', () => console.log(`Postback (${ROLE}): порт ${PB_PORT}, шлях /pb/<token>`));
 } else {
   console.log('Postback: обслуговується основним процесом на /pb/<token>');
 }
 
 // Фонові перевірки й розсилка (аналог BullMQ-воркера на малому масштабі).
+// У сервісі постбеків воркер не потрібен: інакше сповіщення підуть двічі.
 const tick = async () => {
   try {
     await runChecks();
@@ -109,5 +114,7 @@ const tick = async () => {
     await flushQueue();
   } catch (e) { await captureError(e, { logger: 'worker' }); }
 };
-setInterval(tick, Number(process.env.CRM_TICK_MS || 15 * 60_000)).unref();
-setTimeout(tick, 5_000).unref();
+if (ROLE !== 'postback') {
+  setInterval(tick, Number(process.env.CRM_TICK_MS || 15 * 60_000)).unref();
+  setTimeout(tick, 5_000).unref();
+}
