@@ -1,0 +1,181 @@
+// Універсальний список + форма для будь-якої сутності з /api/meta.
+import { api } from '../api.js';
+import { state, reloadRefs } from '../app.js';
+import { el, money, num, badge, modal, toast } from '../ui.js';
+
+const PAGE = 50;
+
+function refLabel(field, value) {
+  if (value === null || value === undefined) return '—';
+  const list = state.refs[field.ref] || [];
+  return list.find((r) => String(r.id) === String(value))?.label || `#${value}`;
+}
+
+function cellValue(field, row) {
+  const v = row[field.name];
+  if (v === null || v === undefined || v === '') return '—';
+  if (field.type === 'ref') return refLabel(field, v);
+  if (field.type === 'money') return money(v);
+  if (field.type === 'number') return num(v);
+  if (field.type === 'select') {
+    const opt = (field.options || []).find((o) => o.value === String(v));
+    return badge(v, opt?.label || v);
+  }
+  if (field.type === 'url') return el('a', { href: v, target: '_blank', rel: 'noreferrer' }, 'лінк');
+  if (field.type === 'datetime') return String(v).slice(0, 16);
+  if (field.type === 'textarea') return String(v).slice(0, 60);
+  return String(v);
+}
+
+function formField(field, value, entKey, rowId) {
+  const id = `f_${field.name}`;
+  let input;
+  if (field.type === 'select') {
+    input = el('select', { name: field.name, id },
+      el('option', { value: '' }, '—'),
+      ...(field.options || []).map((o) => el('option', { value: o.value, selected: String(value) === o.value }, o.label)));
+  } else if (field.type === 'ref') {
+    input = el('select', { name: field.name, id },
+      el('option', { value: '' }, '—'),
+      ...(state.refs[field.ref] || []).map((r) => el('option', { value: r.id, selected: String(value) === String(r.id) }, `${r.label} (#${r.id})`)));
+  } else if (field.type === 'textarea') {
+    input = el('textarea', { name: field.name, id, rows: 3 }, value ?? '');
+  } else if (field.type === 'secret' || field.type === 'password') {
+    input = el('input', { name: field.name, id, type: 'password', placeholder: value ? 'збережено — введіть, щоб змінити' : '' });
+  } else {
+    const type = { number: 'number', money: 'number', date: 'date', datetime: 'datetime-local', url: 'url' }[field.type] || 'text';
+    let v = value ?? '';
+    if (field.type === 'datetime' && v) v = String(v).replace(' ', 'T').slice(0, 16);
+    input = el('input', { name: field.name, id, type, step: field.type === 'money' ? '0.01' : undefined, value: v, disabled: field.readOnly });
+  }
+  const wrap = el('div', { class: 'field' },
+    el('label', { for: id }, field.label + (field.required ? ' *' : '')), input,
+    field.hint ? el('div', { class: 'muted', style: 'font-size:11.5px;margin-top:3px' }, field.hint) : null);
+
+  if (field.type === 'secret' && rowId && state.caps.secrets) {
+    wrap.append(el('button', {
+      class: 'btn small', type: 'button', style: 'margin-top:6px',
+      onclick: async () => {
+        const res = await api.get(`/${entKey}/${rowId}/secret/${field.name}`);
+        toast(`${field.label}: ${res.value ?? '—'}`);
+      },
+    }, 'Показати (пишеться в аудит)'));
+  }
+  return wrap;
+}
+
+function openForm(entKey, row, onSaved) {
+  const ent = state.meta[entKey];
+  const form = el('form', {});
+  for (const f of ent.fields) {
+    if (f.readOnly && !row) continue;
+    form.append(formField(f, row?.[f.name], entKey, row?.id));
+  }
+  const save = el('button', { class: 'btn primary', type: 'submit' }, row ? 'Зберегти' : 'Створити');
+  const box = modal(row ? `${ent.label}: редагування #${row.id}` : `${ent.label}: новий запис`, form, [save]);
+  save.addEventListener('click', (e) => { e.preventDefault(); form.requestSubmit(); });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = {};
+    for (const f of ent.fields) {
+      const input = form.querySelector(`[name="${f.name}"]`);
+      if (!input || input.disabled) continue;
+      let v = input.value;
+      if ((f.type === 'secret' || f.type === 'password') && v === '') continue;  // не затираємо збережене
+      if (f.type === 'datetime' && v) v = v.replace('T', ' ');
+      data[f.name] = v;
+    }
+    try {
+      if (row) await api.put(`/${entKey}/${row.id}`, data);
+      else await api.post(`/${entKey}`, data);
+      box.remove();
+      toast('Збережено');
+      await reloadRefs();
+      onSaved();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
+export async function renderEntity(entKey) {
+  const ent = state.meta[entKey];
+  if (!ent) throw new Error('Розділ недоступний для вашої ролі');
+  const box = el('div', {});
+  const filters = { limit: PAGE, offset: 0 };
+
+  const statusField = ent.fields.find((f) => f.name === 'status');
+  const search = el('input', { placeholder: 'Пошук…', style: 'max-width:240px' });
+  const statusSel = statusField
+    ? el('select', { style: 'max-width:180px' }, el('option', { value: '' }, 'Усі статуси'),
+      ...statusField.options.map((o) => el('option', { value: o.value }, o.label)))
+    : null;
+
+  const tableWrap = el('div', { class: 'table-wrap' });
+  const pager = el('div', { class: 'pager' });
+
+  async function load() {
+    const params = new URLSearchParams({ limit: String(PAGE), offset: String(filters.offset) });
+    if (search.value) params.set('q', search.value);
+    if (statusSel?.value) params.set('status', statusSel.value);
+    const dateField = ent.fields.find((f) => ['date', 'datetime'].includes(f.type) && f.list);
+    if (dateField && ['posts', 'conversions', 'expenses', 'audit_log'].includes(entKey)) {
+      params.set('from', state.range.from);
+      params.set('to', state.range.to);
+    }
+    const data = await api.get(`/${entKey}?${params}`);
+    const cols = ent.fields.filter((f) => f.list).slice(0, 9);
+    const table = el('table', {},
+      el('thead', {}, el('tr', {}, ...cols.map((f) => el('th', {}, f.label)), el('th', {}, ''))),
+      el('tbody', {}, ...data.rows.map((row) => el('tr', {},
+        ...cols.map((f) => el('td', { class: ['money', 'number'].includes(f.type) ? 'num' : '' }, cellValue(f, row))),
+        el('td', {},
+          ent.can.update ? el('button', { class: 'btn small', onclick: () => openForm(entKey, row, load) }, '✎') : null,
+          ent.can.delete ? el('button', {
+            class: 'btn small danger', style: 'margin-left:6px',
+            onclick: async () => {
+              if (!confirm(`Видалити запис #${row.id}?`)) return;
+              await api.del(`/${entKey}/${row.id}`);
+              toast('Видалено');
+              load();
+            },
+          }, '✕') : null,
+          entKey === 'accounts' ? el('button', {
+            class: 'btn small', style: 'margin-left:6px',
+            onclick: async () => {
+              const h = await api.get(`/accounts/${row.id}/history`);
+              modal(`Історія акаунта #${row.id}`, el('div', { class: 'table-wrap' }, el('table', {},
+                el('thead', {}, el('tr', {}, el('th', {}, 'Коли'), el('th', {}, 'Було'), el('th', {}, 'Стало'))),
+                el('tbody', {}, ...h.rows.map((e2) => el('tr', {},
+                  el('td', {}, String(e2.created_at).slice(0, 16)), el('td', {}, e2.from_status || '—'), el('td', {}, e2.to_status)))))));
+            },
+          }, '🕓') : null)))));
+    tableWrap.textContent = '';
+    tableWrap.append(data.rows.length ? table : el('div', { class: 'muted' }, 'Записів немає'));
+    pager.textContent = '';
+    pager.append(
+      el('button', { class: 'btn small', onclick: () => { filters.offset = Math.max(0, filters.offset - PAGE); load(); } }, '‹'),
+      `${data.offset + 1}–${Math.min(data.offset + PAGE, data.total)} з ${data.total}`,
+      el('button', { class: 'btn small', onclick: () => { if (filters.offset + PAGE < data.total) { filters.offset += PAGE; load(); } } }, '›'));
+  }
+
+  const toolbar = el('div', { class: 'row', style: 'margin-bottom:14px' },
+    search, statusSel,
+    el('div', { style: 'flex:2 1 auto;display:flex;gap:8px;justify-content:flex-end' },
+      el('button', { class: 'btn', onclick: () => { filters.offset = 0; load(); } }, 'Застосувати'),
+      state.caps.export ? el('button', {
+        class: 'btn',
+        onclick: () => { window.location.href = `/api/${entKey}/export?limit=500`; toast('Експорт записано в аудит-лог'); },
+      }, 'Експорт CSV') : null,
+      ent.can.create ? el('button', { class: 'btn primary', onclick: () => openForm(entKey, null, load) }, '+ Додати') : null));
+
+  search.addEventListener('keydown', (e) => { if (e.key === 'Enter') { filters.offset = 0; load(); } });
+  box.append(toolbar, el('div', { class: 'card' }, tableWrap, pager));
+  if (ent.scope !== 'all') {
+    box.append(el('div', { class: 'muted', style: 'font-size:12px' },
+      ent.scope === 'own' ? 'Видно лише ваші записи.' : 'Видно записи вашої команди.'));
+  }
+  await load();
+  return box;
+}

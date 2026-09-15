@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Gennect CRM</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📊</text></svg>">
+</head>
+<body>
+<div id="login" class="login-wrap">
+  <form class="login-card" id="login-form">
+    <h1>Gennect CRM</h1>
+    <p class="sub">УБТ-команда: ресурси, заливи, трекінг, фінанси</p>
+    <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
+    <div class="field"><label>Пароль</label><input name="password" type="password" autocomplete="current-password" required></div>
+    <div class="field hidden" id="totp-field"><label>Код 2FA</label><input name="totp" inputmode="numeric" autocomplete="one-time-code"></div>
+    <div class="error hidden" id="login-error"></div>
+    <button class="btn primary" style="width:100%" type="submit">Увійти</button>
+  </form>
+</div>
+
+<div id="app" class="shell hidden">
+  <aside class="sidebar">
+    <div class="brand"><span class="dot"></span> Gennect CRM</div>
+    <nav class="nav" id="nav"></nav>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <h2 id="page-title">Дашборд</h2>
+      <input type="date" id="date-from" style="max-width:150px">
+      <input type="date" id="date-to" style="max-width:150px">
+      <span class="muted" id="who"></span>
+      <button class="btn small" id="logout">Вийти</button>
+    </header>
+    <main class="content" id="view"></main>
+  </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
