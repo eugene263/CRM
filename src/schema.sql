@@ -442,3 +442,218 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   hidden_fields TEXT                      -- через кому
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_role_entity ON role_permissions(role_key, entity);
+
+-- ── Списки пошуку (prospecting) ───────────────────────────────────────────
+-- Три рівні: список → лід → контакт → тач. Статус живе і на ліді (де він у
+-- воронці), і на кожному тачі (доставлено/прочитано/відповіли).
+CREATE TABLE IF NOT EXISTS prospect_lists (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  kind TEXT NOT NULL DEFAULT 'manual',     -- manual|import|auto|mixed|smart
+  smart_filter TEXT,                       -- JSON-фільтр для смарт-списку
+  geo TEXT,
+  vertical TEXT,
+  language TEXT,
+  owner_user_id INTEGER REFERENCES users(id),
+  team_id INTEGER REFERENCES teams(id),
+  status TEXT NOT NULL DEFAULT 'active',   -- draft|active|paused|closed|archived
+  goal_leads INTEGER DEFAULT 0,
+  goal_touches INTEGER DEFAULT 0,
+  deadline TEXT,
+  tags TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS list_members (
+  id INTEGER PRIMARY KEY,
+  list_id INTEGER NOT NULL REFERENCES prospect_lists(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  role TEXT NOT NULL DEFAULT 'member'      -- owner|member|viewer
+);
+
+-- Статуси лідів редагуються в інтерфейсі, а не в коді.
+CREATE TABLE IF NOT EXISTS lead_statuses (
+  id INTEGER PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  color TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_terminal INTEGER NOT NULL DEFAULT 0,
+  is_won INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+
+-- Спільний довідник: канали джерел, причини дискваліфікації/відмови тощо.
+CREATE TABLE IF NOT EXISTS dictionaries (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,                      -- source_channel|disqualify_reason|lost_reason|vertical|touch_channel
+  code TEXT NOT NULL,
+  label TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_dict ON dictionaries(kind, code);
+
+CREATE TABLE IF NOT EXISTS leads (
+  id INTEGER PRIMARY KEY,
+  list_id INTEGER REFERENCES prospect_lists(id),
+  company_name TEXT NOT NULL,
+  website TEXT,
+  geo_country TEXT,
+  geo_city TEXT,
+  address TEXT,
+  vertical TEXT,
+  size_metric TEXT,
+  language TEXT,
+  status_code TEXT NOT NULL DEFAULT 'new',
+  priority TEXT NOT NULL DEFAULT 'warm',   -- hot|warm|cold
+  score INTEGER NOT NULL DEFAULT 0,
+  owner_user_id INTEGER REFERENCES users(id),
+  team_id INTEGER REFERENCES teams(id),
+  disqualify_reason TEXT,
+  lost_reason TEXT,
+  next_contact_at TEXT,
+  snooze_until TEXT,
+  google_place_id TEXT,
+  phone TEXT,
+  email TEXT,
+  touches_count INTEGER NOT NULL DEFAULT 0,
+  last_touch_at TEXT,
+  first_touch_at TEXT,
+  replied_at TEXT,
+  qualified_at TEXT,
+  tags TEXT,
+  note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_leads_list ON leads(list_id, status_code);
+CREATE INDEX IF NOT EXISTS idx_leads_queue ON leads(owner_user_id, next_contact_at);
+CREATE INDEX IF NOT EXISTS idx_leads_place ON leads(google_place_id);
+
+CREATE TABLE IF NOT EXISTS lead_socials (
+  id INTEGER PRIMARY KEY,
+  lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL,                  -- instagram|tiktok|youtube|facebook
+  handle TEXT,
+  url TEXT,
+  followers INTEGER,
+  last_post_at TEXT,
+  avg_views INTEGER,
+  checked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_socials_lead ON lead_socials(lead_id);
+CREATE INDEX IF NOT EXISTS idx_socials_handle ON lead_socials(platform, handle);
+
+-- «Де знайшли» — окрема сутність, бо без неї не порахувати конверсію джерел.
+CREATE TABLE IF NOT EXISTS lead_sources (
+  id INTEGER PRIMARY KEY,
+  lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  channel TEXT NOT NULL,                   -- код із dictionaries(source_channel)
+  query TEXT,                              -- пошуковий запит або хештег
+  url TEXT,
+  method TEXT NOT NULL DEFAULT 'manual',   -- manual|import|auto
+  signals TEXT,                            -- JSON: ллє рекламу, наймає SMM, мертвий акаунт
+  found_by INTEGER REFERENCES users(id),
+  found_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_lead_sources ON lead_sources(lead_id);
+
+CREATE TABLE IF NOT EXISTS lead_contacts (
+  id INTEGER PRIMARY KEY,
+  lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,                      -- email|phone|instagram|telegram|whatsapp|linkedin|facebook
+  value TEXT NOT NULL,
+  person_name TEXT,
+  position TEXT,
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  verified INTEGER NOT NULL DEFAULT 0,
+  verified_at TEXT,
+  note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_contacts_lead ON lead_contacts(lead_id);
+CREATE INDEX IF NOT EXISTS idx_contacts_value ON lead_contacts(kind, value);
+
+CREATE TABLE IF NOT EXISTS message_templates (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  channel TEXT,
+  subject TEXT,
+  body TEXT NOT NULL,
+  variables TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS touches (
+  id INTEGER PRIMARY KEY,
+  lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  contact_id INTEGER REFERENCES lead_contacts(id),
+  channel TEXT NOT NULL,                   -- instagram_dm|telegram|email|whatsapp|call|...
+  direction TEXT NOT NULL DEFAULT 'out',   -- out|in
+  from_account TEXT,                       -- з якого нашого акаунта/скриньки
+  template_id INTEGER REFERENCES message_templates(id),
+  message_text TEXT,
+  attachments TEXT,
+  delivery_status TEXT NOT NULL DEFAULT 'sent',  -- sent|delivered|read|failed|blocked
+  outcome TEXT,                            -- none|positive|negative|later
+  touch_number INTEGER NOT NULL DEFAULT 1,
+  sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+  user_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_touches_lead ON touches(lead_id, sent_at);
+CREATE INDEX IF NOT EXISTS idx_touches_user ON touches(user_id, sent_at);
+
+CREATE TABLE IF NOT EXISTS lead_status_history (
+  id INTEGER PRIMARY KEY,
+  lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  user_id INTEGER REFERENCES users(id),
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS lead_notes (
+  id INTEGER PRIMARY KEY,
+  lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  user_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS lead_tasks (
+  id INTEGER PRIMARY KEY,
+  lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  due_at TEXT,
+  assignee_user_id INTEGER REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'open',     -- open|done|canceled
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_lead_tasks ON lead_tasks(assignee_user_id, status, due_at);
+
+CREATE TABLE IF NOT EXISTS duplicates_queue (
+  id INTEGER PRIMARY KEY,
+  lead_a_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  lead_b_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  match_score INTEGER NOT NULL DEFAULT 0,
+  match_reason TEXT,
+  resolved INTEGER NOT NULL DEFAULT 0,
+  resolved_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS suppression_list (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,                      -- domain|email|phone|instagram|company
+  value TEXT NOT NULL,
+  reason TEXT,
+  added_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_suppression ON suppression_list(kind, value);

@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { state, reloadRefs } from '../app.js';
 import { el, money, num, badge, modal, toast } from '../ui.js';
 import { credentialActions } from './vault.js';
+import { openLead } from './prospecting.js';
 
 const PAGE = 50;
 
@@ -152,6 +153,10 @@ export async function renderEntity(entKey) {
             },
           }, '✕') : null,
           entKey === 'credentials' ? credentialActions(row, load) : null,
+          entKey === 'leads' ? el('button', {
+            class: 'btn small', style: 'margin-left:6px', title: 'Картка ліда',
+            onclick: () => openLead(row.id, load),
+          }, '🗂') : null,
           entKey === 'users' && state.caps.settings && row.status === 'active' ? el('button', {
             class: 'btn small danger', style: 'margin-left:6px', title: 'Офбординг',
             onclick: async () => {

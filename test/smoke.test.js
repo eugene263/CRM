@@ -358,3 +358,170 @@ test('сесію можна завершити примусово', async () => 
   assert.equal(res.data.killed, 1);
   assert.equal((await call('/api/payouts', { as: 'finance' })).status, 401, 'сесія більше не діє');
 });
+
+// ── Списки пошуку ────────────────────────────────────────────────────────
+
+async function createLead(body, { force = false, as = 'owner' } = {}) {
+  return call(`/api/prospecting/leads${force ? '?force=1' : ''}`, { method: 'POST', body, as });
+}
+
+const baseSource = { channel: 'google_maps', query: 'кавʼярні Львів' };
+
+test('лід не створюється без джерела — інакше не порахувати канали', async () => {
+  const res = await createLead({ company_name: 'Без джерела' });
+  assert.equal(res.status, 400);
+  assert.match(res.data.error, /де знайшли/);
+});
+
+test('лід створюється з джерелом, соцмережами і рахує дні без контенту', async () => {
+  const res = await createLead({
+    company_name: 'Тестова кавʼярня Ранок', geo_city: 'Тернопіль', website: 'https://ranok-test.example',
+    socials: [{ platform: 'instagram', handle: 'ranok_test_cafe', followers: 12000, last_post_at: '2026-06-01' }],
+    source: { ...baseSource, signals: ['мертвий акаунт'] },
+  });
+  assert.equal(res.status, 200);
+  const card = await call(`/api/prospecting/leads/${res.data.id}`);
+  assert.equal(card.data.lead.company_name, 'Тестова кавʼярня Ранок');
+  assert.equal(card.data.sources[0].channel, 'google_maps');
+  assert.ok(card.data.socials[0].days_without_content > 30, 'рахує тишу в акаунті');
+});
+
+test('дубль по домену блокується, але створюється з підтвердженням', async () => {
+  await createLead({ company_name: 'Пекарня А', website: 'https://pekarnya.example', source: baseSource });
+  const dupe = await createLead({ company_name: 'Пекарня Б', website: 'https://pekarnya.example/about', source: baseSource });
+  assert.equal(dupe.status, 409);
+  assert.ok(dupe.data.duplicate);
+
+  const forced = await createLead({ company_name: 'Пекарня Б', website: 'https://pekarnya.example/about', source: baseSource }, { force: true });
+  assert.equal(forced.status, 200);
+  const dups = await call('/api/prospecting/duplicates');
+  assert.ok(dups.data.rows.length > 0, 'потрапляє в чергу на розбір');
+});
+
+test('чорний список не пускає лід у роботу', async () => {
+  await call('/api/suppression_list', { method: 'POST', body: { kind: 'domain', value: 'stop.example', reason: 'відписались' } });
+  const res = await createLead({ company_name: 'Стоп', website: 'https://stop.example', source: baseSource });
+  assert.equal(res.status, 409);
+  assert.match(res.data.error, /чорн/i);
+});
+
+test('тач без тексту не зараховується', async () => {
+  const lead = await createLead({ company_name: 'Порожній тач', source: baseSource });
+  const res = await call(`/api/prospecting/leads/${lead.data.id}/touch`, {
+    method: 'POST', body: { channel: 'instagram_dm', message_text: '  ' },
+  });
+  assert.equal(res.status, 400);
+});
+
+test('тач рухає статус, нумерується і ставить фолоу-ап', async () => {
+  const lead = await createLead({ company_name: 'Тач-флоу', source: baseSource });
+  const id = lead.data.id;
+
+  const first = await call(`/api/prospecting/leads/${id}/touch`, {
+    method: 'POST', body: { channel: 'instagram_dm', from_account: 'ig_manager_1', message_text: 'Привіт! Зробили вам приклад ролика' },
+  });
+  assert.equal(first.status, 200);
+  assert.equal(first.data.touch_number, 1);
+  assert.ok(first.data.next_contact_at, 'наступний контакт проставлений автоматично');
+
+  const card = await call(`/api/prospecting/leads/${id}`);
+  assert.equal(card.data.lead.status_code, 'contacted');
+  assert.equal(card.data.lead.touches_count, 1);
+  assert.ok(card.data.tasks.some((t) => t.status === 'open'), 'створено задачу на фолоу-ап');
+});
+
+test('подвійний тач попереджає, доки не підтвердиш', async () => {
+  const lead = await createLead({ company_name: 'Подвійний тач', source: baseSource });
+  const id = lead.data.id;
+  await call(`/api/prospecting/leads/${id}/touch`, { method: 'POST', body: { channel: 'telegram', message_text: 'перший' } });
+
+  const second = await call(`/api/prospecting/leads/${id}/touch`, { method: 'POST', body: { channel: 'telegram', message_text: 'другий' } });
+  assert.equal(second.status, 409);
+  assert.ok(second.data.needForce);
+
+  const forced = await call(`/api/prospecting/leads/${id}/touch?force=1`, { method: 'POST', body: { channel: 'telegram', message_text: 'другий' } });
+  assert.equal(forced.data.touch_number, 2);
+});
+
+test('вхідний тач переводить лід у «Відповіли»', async () => {
+  const lead = await createLead({ company_name: 'Відповідь', source: baseSource });
+  const id = lead.data.id;
+  await call(`/api/prospecting/leads/${id}/touch`, { method: 'POST', body: { channel: 'email', message_text: 'перший дотик' } });
+  await call(`/api/prospecting/leads/${id}/touch`, { method: 'POST', body: { channel: 'email', direction: 'in', message_text: 'цікаво, розкажіть' } });
+  const card = await call(`/api/prospecting/leads/${id}`);
+  assert.equal(card.data.lead.status_code, 'replied');
+  assert.ok(card.data.lead.replied_at);
+});
+
+test('дискваліфікація вимагає причини', async () => {
+  const lead = await createLead({ company_name: 'Без причини', source: baseSource });
+  const bad = await call(`/api/prospecting/leads/${lead.data.id}/status`, { method: 'POST', body: { status_code: 'disqualified' } });
+  assert.equal(bad.status, 400);
+
+  const good = await call(`/api/prospecting/leads/${lead.data.id}/status`, {
+    method: 'POST', body: { status_code: 'disqualified', disqualify_reason: 'wrong_geo' },
+  });
+  assert.equal(good.status, 200);
+  const card = await call(`/api/prospecting/leads/${lead.data.id}`);
+  assert.equal(card.data.lead.disqualify_reason, 'wrong_geo');
+  assert.equal(card.data.lead.next_contact_at, null, 'кінцевий статус прибирає з черги');
+});
+
+test('масова вставка створює лідів із посилань', async () => {
+  const res = await call('/api/prospecting/bulk', {
+    method: 'POST',
+    body: {
+      text: 'https://instagram.com/coffee_one\n@coffee_two\nhttps://bakery-three.example',
+      source: { channel: 'instagram_search', query: '#lvivcoffee' },
+    },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.created, 3);
+});
+
+test('черга на сьогодні показує прострочене і відповіді', async () => {
+  const res = await call('/api/prospecting/queue');
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.data.overdue) && Array.isArray(res.data.replies) && Array.isArray(res.data.fresh));
+});
+
+test('воронка рахує джерела й номери тачів', async () => {
+  const f = await call('/api/prospecting/funnel');
+  assert.equal(f.status, 200);
+  const maps = f.data.bySource.find((r) => r.channel === 'google_maps');
+  assert.ok(maps.leads > 0);
+  assert.ok(f.data.byTouchNumber.some((r) => r.touch_number === 1));
+});
+
+test('обʼєднання дублів зберігає історію тачів', async () => {
+  const a = await createLead({ company_name: 'Мердж А', website: 'https://merge.example', source: baseSource });
+  const b = await createLead({ company_name: 'Мердж Б', website: 'https://merge.example/x', source: baseSource }, { force: true });
+  await call(`/api/prospecting/leads/${b.data.id}/touch`, { method: 'POST', body: { channel: 'email', message_text: 'писали на Б' } });
+
+  const dup = (await call('/api/prospecting/duplicates')).data.rows
+    .find((r) => [r.lead_a_id, r.lead_b_id].includes(b.data.id));
+  const res = await call(`/api/prospecting/duplicates/${dup.id}/resolve`, { method: 'POST', body: { action: 'merge' } });
+  assert.equal(res.status, 200);
+
+  const card = await call(`/api/prospecting/leads/${res.data.kept}`);
+  assert.ok(card.data.touches.some((t) => t.message_text === 'писали на Б'), 'тач переїхав, а не зник');
+  assert.equal((await call(`/api/prospecting/leads/${res.data.merged}`)).status, 404);
+});
+
+test('менеджер з пошуку бачить лише своїх лідів і не лізе в ресурси', async () => {
+  const created = await call('/api/users', {
+    method: 'POST',
+    body: { name: 'Менеджер Сергій', email: 'sales@gennect.local', role: 'sales', password: 'demo1234', status: 'active' },
+  });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  await login('sales', 'sales@gennect.local', 'demo1234');
+
+  assert.equal((await call('/api/accounts', { as: 'sales' })).status, 403, 'до ресурсів УБТ доступу немає');
+  const mine = await call('/api/leads?limit=100', { as: 'sales' });
+  assert.equal(mine.status, 200);
+  assert.equal(mine.data.total, 0, 'чужі ліди не видно');
+
+  const own = await createLead({ company_name: 'Власний лід менеджера', source: baseSource }, { as: 'sales' });
+  assert.equal(own.status, 200);
+  assert.equal((await call('/api/leads?limit=100', { as: 'sales' })).data.total, 1);
+});

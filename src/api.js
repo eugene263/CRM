@@ -7,6 +7,7 @@ import {
   invalidateRbacCache, roleRow, revealLimit,
 } from './rbac.js';
 import * as vault from './vault.js';
+import * as prospecting from './prospecting.js';
 import { encrypt, decrypt, token, hashIp } from './crypto.js';
 import { hashPassword } from './crypto.js';
 import * as auth from './auth.js';
@@ -362,6 +363,78 @@ export async function handleApi(req, res, url) {
     return ok(res, result);
   }
 
+  // --- пошук клієнтів ---
+  if (seg[0] === 'prospecting') {
+    if (!can(user, 'leads', 'read')) return fail(res, 403, 'Немає доступу до модуля пошуку');
+    const force = query.force === '1' || query.force === 'true';
+
+    if (seg[1] === 'queue') return ok(res, await prospecting.todayQueue(user));
+    if (seg[1] === 'funnel') return ok(res, await prospecting.funnel(user, query));
+    if (seg[1] === 'dictionaries') {
+      return ok(res, {
+        statuses: await all('SELECT * FROM lead_statuses WHERE is_active=1 ORDER BY sort_order'),
+        dictionaries: await all('SELECT * FROM dictionaries WHERE is_active=1 ORDER BY kind, sort_order'),
+        templates: await all('SELECT id, name, channel, subject, body FROM message_templates WHERE is_active=1 ORDER BY name'),
+      });
+    }
+    if (seg[1] === 'duplicates') {
+      if (seg[2] && seg[3] === 'resolve' && req.method === 'POST') {
+        if (!can(user, 'leads', 'update')) return fail(res, 403, 'Немає прав');
+        const body = await readBody(req);
+        return ok(res, await prospecting.resolveDuplicate(user, Number(seg[2]), body));
+      }
+      return ok(res, { rows: await all(
+        `SELECT d.*, a.company_name AS a_name, b.company_name AS b_name
+           FROM duplicates_queue d
+           JOIN leads a ON a.id=d.lead_a_id JOIN leads b ON b.id=d.lead_b_id
+          WHERE d.resolved=0 ORDER BY d.match_score DESC LIMIT 200`) });
+    }
+
+    if (seg[1] === 'leads' && req.method === 'POST' && !seg[2]) {
+      if (!can(user, 'leads', 'create')) return fail(res, 403, 'Немає прав додавати лідів');
+      const body = await readBody(req);
+      try {
+        return ok(res, await prospecting.createLead(user, body, { force }));
+      } catch (e) {
+        if (e.duplicate) return fail(res, 409, e.message, { duplicate: e.duplicate });
+        throw e;
+      }
+    }
+    if (seg[1] === 'bulk' && req.method === 'POST') {
+      if (!can(user, 'leads', 'create')) return fail(res, 403, 'Немає прав додавати лідів');
+      return ok(res, await prospecting.bulkAdd(user, await readBody(req)));
+    }
+
+    if (seg[1] === 'leads' && seg[2]) {
+      const leadId = Number(seg[2]);
+      if (req.method === 'GET' && !seg[3]) return ok(res, await prospecting.leadCard(leadId));
+      const body = req.method === 'POST' ? await readBody(req) : {};
+      if (seg[3] === 'status' && req.method === 'POST') {
+        return ok(res, await prospecting.setStatus(user, leadId, body.status_code, body));
+      }
+      if (seg[3] === 'touch' && req.method === 'POST') {
+        try {
+          return ok(res, await prospecting.logTouch(user, leadId, body, { force }));
+        } catch (e) {
+          if (e.needForce) return fail(res, 409, e.message, { needForce: true });
+          throw e;
+        }
+      }
+      if (seg[3] === 'note' && req.method === 'POST') {
+        const id = await insert('lead_notes', { lead_id: leadId, text: String(body.text || '').slice(0, 4000), user_id: user.id });
+        return ok(res, { id });
+      }
+      if (seg[3] === 'contacts' && req.method === 'POST') {
+        const id = await insert('lead_contacts', {
+          lead_id: leadId, kind: body.kind, value: body.value, person_name: body.person_name ?? null,
+          position: body.position ?? null, is_primary: body.is_primary ? 1 : 0,
+        });
+        return ok(res, { id });
+      }
+    }
+    return fail(res, 404, 'Немає такого ендпоїнта');
+  }
+
   // --- сейф доступів ---
   if (seg[0] === 'credentials' && seg[1] && seg[2]) {
     const credId = Number(seg[1]);
@@ -418,7 +491,7 @@ export async function handleApi(req, res, url) {
       for (const entityKey of Object.keys(entities)) {
         await insert('role_permissions', { role_key: body.key, entity: entityKey, level: 'none', scope: 'own', hidden_fields: null });
       }
-      invalidateRbacCache();
+      await invalidateRbacCache();
       await audit({ user_id: user.id, action: 'role_create', entity: 'roles', payload: { key: body.key }, ip });
       return ok(res, { ok: true });
     }
@@ -445,7 +518,7 @@ export async function handleApi(req, res, url) {
              ON CONFLICT(role_key, entity) DO UPDATE SET level=excluded.level, scope=excluded.scope, hidden_fields=excluded.hidden_fields`,
           roleKey, p.entity, p.level, p.scope, (p.hidden_fields || []).join(',') || null);
       }
-      invalidateRbacCache();
+      await invalidateRbacCache();
       await audit({ user_id: user.id, action: 'role_update', entity: 'roles', payload: { role: roleKey, changed: (body.permissions || []).length }, ip });
       return ok(res, { ok: true });
     }
@@ -456,7 +529,7 @@ export async function handleApi(req, res, url) {
       if (await get('SELECT id FROM users WHERE role=? LIMIT 1', seg[1])) return fail(res, 409, 'Роль призначена користувачам');
       await run('DELETE FROM role_permissions WHERE role_key=?', seg[1]);
       await run('DELETE FROM roles WHERE key=?', seg[1]);
-      invalidateRbacCache();
+      await invalidateRbacCache();
       await audit({ user_id: user.id, action: 'role_delete', entity: 'roles', payload: { key: seg[1] }, ip });
       return ok(res, { ok: true });
     }

@@ -230,6 +230,79 @@ async function seedDemo() {
   await insert('tasks', { title: 'Змонтувати 10 варіантів під Casino X UA', assignee_user_id: users[6].id, creator_user_id: users[1].id, status: 'in_progress', due_date: day(-2) });
   await insert('tasks', { title: 'Перезняти хук «скрін виплати»', assignee_user_id: users[6].id, creator_user_id: users[1].id, status: 'todo', due_date: day(-5) });
 
+  // Демо для модуля пошуку клієнтів: список, ліди з джерелами й тачами.
+  const salesUser = users[1];
+  const listId = await insert('prospect_lists', {
+    name: 'Кавʼярні Львів, вересень', description: 'Перевіряємо, чи заходить локальний HoReCa',
+    kind: 'manual', geo: 'UA', vertical: 'horeca', language: 'uk',
+    owner_user_id: salesUser.id, team_id: salesUser.team_id, status: 'active', goal_leads: 200, goal_touches: 500,
+  });
+  const prospects = [
+    ['Кавʼярня Світанок', 'Львів', 'svitanok_lviv', 12400, 95, 'google_maps', 'кавʼярні Львів', 'hot'],
+    ['Pasta Bar Nonna', 'Львів', 'nonna_pasta', 8300, 60, 'instagram_search', '#lvivfood', 'warm'],
+    ['Barber House', 'Львів', 'barberhouse_ua', 21000, 20, 'hashtag', '#lvivbarber', 'warm'],
+    ['Fitness Loft', 'Київ', 'fitnessloft_kyiv', 45000, 140, 'ad_library', 'фітнес Київ', 'hot'],
+    ['Zero Waste Shop', 'Одеса', 'zerowaste_od', 5200, 210, 'catalog', 'еко магазини', 'cold'],
+  ];
+  const leadIds = [];
+  for (const [name, city, handle, followers, silence, channel, query, priority] of prospects) {
+    const id = await insert('leads', {
+      list_id: listId, company_name: name, geo_city: city, geo_country: 'UA', vertical: 'horeca',
+      status_code: 'qualified', priority, score: rnd(55, 92), owner_user_id: salesUser.id,
+      team_id: salesUser.team_id, created_by: salesUser.id, qualified_at: `${day(rnd(3, 20))} 12:00:00`,
+      next_contact_at: `${day(rnd(-2, 2))} 10:00:00`,
+    });
+    await insert('lead_socials', {
+      lead_id: id, platform: 'instagram', handle, url: `https://instagram.com/${handle}`,
+      followers, last_post_at: day(silence), checked_at: `${day(1)} 09:00:00`,
+    });
+    await insert('lead_sources', {
+      lead_id: id, channel, query, method: 'manual', found_by: salesUser.id,
+      signals: JSON.stringify(silence > 60 ? ['мертвий акаунт'] : ['ллє рекламу']),
+      found_at: `${day(rnd(3, 20))} 11:00:00`,
+    });
+    await insert('lead_contacts', { lead_id: id, kind: 'instagram', value: `@${handle}`, is_primary: 1 });
+    leadIds.push(id);
+  }
+
+  // Перші два ліди вже в роботі: один мовчить, другий відповів.
+  await insert('touches', {
+    lead_id: leadIds[0], channel: 'instagram_dm', direction: 'out', from_account: 'ig_sales_1',
+    message_text: 'Привіт! Зняли для вас приклад Reels — подивіться', touch_number: 1,
+    sent_at: `${day(5)} 12:20:00`, user_id: salesUser.id, delivery_status: 'read',
+  });
+  await insert('touches', {
+    lead_id: leadIds[0], channel: 'instagram_dm', direction: 'out', from_account: 'ig_sales_1',
+    message_text: 'Нагадую про приклад — цікаво обговорити?', touch_number: 2,
+    sent_at: `${day(2)} 11:00:00`, user_id: salesUser.id, delivery_status: 'delivered',
+  });
+  await run(`UPDATE leads SET status_code='followup', touches_count=2, first_touch_at=?, last_touch_at=? WHERE id=?`,
+    `${day(5)} 12:20:00`, `${day(2)} 11:00:00`, leadIds[0]);
+
+  await insert('touches', {
+    lead_id: leadIds[3], channel: 'email', direction: 'out', from_account: 'hello@gennect.io',
+    message_text: 'Аудит вашого TikTok + приклад ролика', touch_number: 1,
+    sent_at: `${day(4)} 09:30:00`, user_id: salesUser.id, delivery_status: 'read',
+  });
+  await insert('touches', {
+    lead_id: leadIds[3], channel: 'email', direction: 'in',
+    message_text: 'Цікаво, надішліть деталі та ціни', touch_number: 1,
+    sent_at: `${day(3)} 18:05:00`, user_id: salesUser.id,
+  });
+  await run(`UPDATE leads SET status_code='replied', touches_count=1, first_touch_at=?, last_touch_at=?, replied_at=? WHERE id=?`,
+    `${day(4)} 09:30:00`, `${day(4)} 09:30:00`, `${day(3)} 18:05:00`, leadIds[3]);
+
+  await insert('message_templates', {
+    name: 'IG DM — демо-ролик', channel: 'instagram_dm',
+    body: 'Привіт, {{company}}! Побачили ваш профіль — {{days_since_post}} днів без відео. Зняли приклад Reels для вас, скинути?',
+    variables: 'company, days_since_post', created_by: salesUser.id,
+  });
+  await insert('message_templates', {
+    name: 'Email — аудит', channel: 'email', subject: 'Коротко про ваш контент',
+    body: 'Вітаю! Подивились соцмережі {{company}} у {{city}}. Підготували міні-аудит і приклад ролика.',
+    variables: 'company, city', created_by: salesUser.id,
+  });
+
   console.log(`Демо-дані: ${accounts.length} акаунтів, ${posts} публікацій, ${(await all('SELECT id FROM conversions')).length} конверсій.`);
   console.log('Демо-логіни: head@gennect.local / lead.a@gennect.local / creator1@gennect.local … пароль demo1234');
 }

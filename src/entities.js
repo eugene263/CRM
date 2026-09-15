@@ -329,6 +329,120 @@ export const entities = {
     ],
   },
 
+  // ── Пошук клієнтів ─────────────────────────────────────────────────────
+  prospect_lists: {
+    label: 'Списки пошуку', group: 'Пошук клієнтів', icon: '🗂', ownField: 'owner_user_id', teamField: 'team_id', title: 'name',
+    fields: [
+      { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
+      { name: 'description', label: 'Гіпотеза / опис', type: 'textarea' },
+      { name: 'kind', label: 'Тип', type: 'select', list: true, options: S(
+        ['manual', 'Ручний'], ['import', 'Імпорт'], ['auto', 'Автоматичний'], ['mixed', 'Змішаний'], ['smart', 'Смарт']) },
+      { name: 'geo', label: 'Гео', type: 'text', list: true },
+      { name: 'vertical', label: 'Вертикаль', type: 'text', list: true },
+      { name: 'language', label: 'Мова', type: 'text' },
+      { name: 'owner_user_id', label: 'Відповідальний', type: 'ref', ref: 'users', list: true },
+      { name: 'team_id', label: 'Команда', type: 'ref', ref: 'teams' },
+      { name: 'status', label: 'Статус', type: 'select', list: true, options: S(
+        ['draft', 'Чернетка'], ['active', 'В роботі'], ['paused', 'Пауза'], ['closed', 'Закритий'], ['archived', 'Архів']) },
+      { name: 'goal_leads', label: 'Ціль: лідів', type: 'number', list: true },
+      { name: 'goal_touches', label: 'Ціль: тачів', type: 'number' },
+      { name: 'deadline', label: 'Дедлайн', type: 'date', list: true },
+      { name: 'tags', label: 'Теги', type: 'text' },
+    ],
+  },
+  leads: {
+    label: 'Ліди', group: 'Пошук клієнтів', icon: '🎯', ownField: 'owner_user_id', teamField: 'team_id', title: 'company_name',
+    defaultSort: 'created_at DESC',
+    fields: [
+      { name: 'company_name', label: 'Бізнес', type: 'text', required: true, list: true },
+      { name: 'status_code', label: 'Статус', type: 'text', list: true, readOnly: true },
+      { name: 'priority', label: 'Пріоритет', type: 'select', list: true, options: S(
+        ['hot', 'Гарячий'], ['warm', 'Теплий'], ['cold', 'Холодний']) },
+      { name: 'score', label: 'Скоринг', type: 'number', list: true },
+      { name: 'list_id', label: 'Список', type: 'ref', ref: 'prospect_lists', list: true },
+      { name: 'website', label: 'Сайт', type: 'url' },
+      { name: 'geo_city', label: 'Місто', type: 'text', list: true },
+      { name: 'geo_country', label: 'Країна', type: 'text' },
+      { name: 'address', label: 'Адреса', type: 'text' },
+      { name: 'vertical', label: 'Вертикаль', type: 'text', list: true },
+      { name: 'size_metric', label: 'Розмір', type: 'text' },
+      { name: 'language', label: 'Мова', type: 'text' },
+      { name: 'phone', label: 'Телефон', type: 'text' },
+      { name: 'email', label: 'Email', type: 'text' },
+      { name: 'owner_user_id', label: 'Відповідальний', type: 'ref', ref: 'users', list: true },
+      { name: 'touches_count', label: 'Тачів', type: 'number', list: true, readOnly: true },
+      { name: 'last_touch_at', label: 'Останній тач', type: 'datetime', list: true, readOnly: true },
+      { name: 'next_contact_at', label: 'Наступний контакт', type: 'datetime', list: true },
+      { name: 'disqualify_reason', label: 'Причина дискваліфікації', type: 'text' },
+      { name: 'lost_reason', label: 'Причина відмови', type: 'text' },
+      { name: 'google_place_id', label: 'Google Place ID', type: 'text' },
+      { name: 'tags', label: 'Теги', type: 'text' },
+      { name: 'note', label: 'Нотатка', type: 'textarea' },
+      { name: 'created_at', label: 'Додано', type: 'datetime', readOnly: true },
+    ],
+  },
+  touches: {
+    label: 'Тачі', group: 'Пошук клієнтів', icon: '✉️', ownField: 'user_id', readOnlyEntity: true, defaultSort: 'sent_at DESC',
+    fields: [
+      { name: 'sent_at', label: 'Коли', type: 'datetime', list: true },
+      { name: 'lead_id', label: 'Лід', type: 'ref', ref: 'leads', list: true },
+      { name: 'channel', label: 'Канал', type: 'text', list: true },
+      { name: 'direction', label: 'Напрямок', type: 'select', list: true, options: S(['out', 'Вихідний'], ['in', 'Вхідний'])},
+      { name: 'from_account', label: 'З якого акаунта', type: 'text', list: true },
+      { name: 'touch_number', label: '№ тача', type: 'number', list: true },
+      { name: 'delivery_status', label: 'Доставка', type: 'text', list: true },
+      { name: 'outcome', label: 'Результат', type: 'text', list: true },
+      { name: 'message_text', label: 'Текст', type: 'textarea' },
+      { name: 'user_id', label: 'Хто', type: 'ref', ref: 'users', list: true },
+    ],
+  },
+  message_templates: {
+    label: 'Шаблони повідомлень', group: 'Пошук клієнтів', icon: '📝', title: 'name',
+    fields: [
+      { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
+      { name: 'channel', label: 'Канал', type: 'text', list: true },
+      { name: 'subject', label: 'Тема (email)', type: 'text' },
+      { name: 'body', label: 'Текст', type: 'textarea', required: true },
+      { name: 'variables', label: 'Змінні', type: 'text', hint: '{{company}}, {{followers}}, {{days_since_post}}' },
+      { name: 'is_active', label: 'Активний', type: 'number', list: true },
+    ],
+  },
+  lead_statuses: {
+    label: 'Статуси лідів', group: 'Пошук клієнтів', icon: '🚦', title: 'name', defaultSort: 'sort_order ASC',
+    fields: [
+      { name: 'code', label: 'Код', type: 'text', required: true, list: true },
+      { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
+      { name: 'color', label: 'Колір', type: 'text' },
+      { name: 'sort_order', label: 'Порядок', type: 'number', list: true },
+      { name: 'is_terminal', label: 'Кінцевий', type: 'number', list: true },
+      { name: 'is_won', label: 'Виграш', type: 'number', list: true },
+      { name: 'is_active', label: 'Активний', type: 'number', list: true },
+    ],
+  },
+  dictionaries: {
+    label: 'Довідники', group: 'Пошук клієнтів', icon: '📚', title: 'label', defaultSort: 'kind ASC',
+    fields: [
+      { name: 'kind', label: 'Довідник', type: 'select', required: true, list: true, options: S(
+        ['source_channel', 'Канали джерел'], ['touch_channel', 'Канали звʼязку'],
+        ['disqualify_reason', 'Причини дискваліфікації'], ['lost_reason', 'Причини відмови'], ['vertical', 'Вертикалі']) },
+      { name: 'code', label: 'Код', type: 'text', required: true, list: true },
+      { name: 'label', label: 'Назва', type: 'text', required: true, list: true },
+      { name: 'sort_order', label: 'Порядок', type: 'number', list: true },
+      { name: 'is_active', label: 'Активний', type: 'number', list: true },
+    ],
+  },
+  suppression_list: {
+    label: 'Чорний список', group: 'Пошук клієнтів', icon: '🚷', defaultSort: 'created_at DESC',
+    fields: [
+      { name: 'kind', label: 'Тип', type: 'select', required: true, list: true, options: S(
+        ['domain', 'Домен'], ['email', 'Email'], ['phone', 'Телефон'], ['instagram', 'Instagram'], ['company', 'Назва']) },
+      { name: 'value', label: 'Значення', type: 'text', required: true, list: true },
+      { name: 'reason', label: 'Причина', type: 'text', list: true },
+      { name: 'added_by', label: 'Хто додав', type: 'ref', ref: 'users', list: true },
+      { name: 'created_at', label: 'Коли', type: 'datetime', readOnly: true, list: true },
+    ],
+  },
+
   // ── Сейф доступів ──────────────────────────────────────────────────────
   credentials: {
     // «Свої» для сейфа — це видані на руки, а не створені: крієйтор має

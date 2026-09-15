@@ -14,6 +14,12 @@ const R = (level, scope = 'all') => ({ level, scope });
 // Базові набори, щоб матриця читалась, а не розповзалась на 200 рядків.
 const RESOURCE = ['accounts', 'devices', 'sims', 'proxies', 'mail_accounts', 'resource_assignments', 'account_events'];
 const VAULT_SELF = { credentials: R('read', 'own'), credential_grants: R('read', 'own'), access_requests: R('write', 'own') };
+// Пошук клієнтів: менеджер працює зі своїми лідами, довідники лише читає.
+const PROSPECTING_SELF = {
+  prospect_lists: R('write', 'team'), leads: R('full', 'own'), touches: R('read', 'own'),
+  message_templates: R('read', 'all'), lead_statuses: R('read', 'all'), dictionaries: R('read', 'all'),
+  suppression_list: R('write', 'all'),
+};
 const CONTENT = ['creatives', 'creative_versions', 'tasks'];
 const MONEY = ['expenses', 'payouts', 'salary_rules', 'partners', 'offers', 'offer_rates_history'];
 
@@ -28,6 +34,9 @@ export const defaultMatrix = {
 
   teamlead: {
     ...spread(RESOURCE, R('write', 'team')),
+    prospect_lists: R('full', 'team'), leads: R('full', 'team'), touches: R('read', 'team'),
+    message_templates: R('full', 'all'), lead_statuses: R('write', 'all'), dictionaries: R('write', 'all'),
+    suppression_list: R('full', 'all'),
     credentials: R('write', 'team'),
     credential_grants: R('read', 'team'),
     access_requests: R('full', 'team'),
@@ -59,6 +68,16 @@ export const defaultMatrix = {
     payouts: R('read', 'own'),
     kpi_targets: R('read', 'own'),
     notifications: R('read', 'own'),
+  },
+
+  sales: {
+    ...VAULT_SELF,
+    ...PROSPECTING_SELF,
+    users: R('read', 'team'),
+    teams: R('read', 'team'),
+    notifications: R('read', 'own'),
+    payouts: R('read', 'own'),
+    kpi_targets: R('read', 'own'),
   },
 
   editor: {
@@ -117,11 +136,13 @@ const CAPS = {
   // ставить не роль, а сам сейф: лише те, що на руках, і добовий ліміт.
   creator: ['secrets'],
   editor: ['secrets'],
+  sales: ['secrets', 'export'],
 };
 
 export const ROLE_LABELS = {
   owner: 'Власник', head: 'Хед', teamlead: 'Тімлід', creator: 'Крієйтор',
   editor: 'Монтажер', farmer: 'Фармер', finance: 'Фінансист', analyst: 'Аналітик',
+  sales: 'Менеджер з пошуку',
 };
 
 // ── Шар БД ────────────────────────────────────────────────────────────────
@@ -137,6 +158,14 @@ export async function refreshRbac() {
     roles.get(p.role_key)?.perms.set(p.entity, p);
   }
   cache = roles;
+  // Поле «Роль» у формі користувача має показувати ролі з БД, включно з
+  // кастомними — інакше нову роль неможливо нікому призначити.
+  const roleField = entities.users.fields.find((f) => f.name === 'role');
+  if (roleField && roles.size) {
+    roleField.options = [...roles.values()]
+      .map((r) => ({ value: r.key, label: r.label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'uk'));
+  }
   return cache;
 }
 
@@ -171,6 +200,32 @@ export async function seedRoles() {
 }
 
 // Права для сутностей, доданих після сідингу (нові модулі в оновленні).
+// Роль, додана в оновленні (наприклад, менеджер з пошуку), має з'явитись
+// і в базі, яка сідилась раніше.
+export async function syncNewRoles() {
+  const known = new Set((await all('SELECT key FROM roles')).map((r) => r.key));
+  const missing = Object.keys(ROLE_LABELS).filter((k) => !known.has(k));
+  for (const key of missing) {
+    const caps = CAPS[key] || [];
+    await run(`INSERT INTO roles (key, label, is_system, can_export, can_reveal, can_salary_calc, can_settings, reveal_daily_limit)
+               VALUES (?,?,1,?,?,?,?,?)`,
+      key, ROLE_LABELS[key],
+      caps.includes('export') ? 1 : 0, caps.includes('secrets') ? 1 : 0,
+      caps.includes('salary_calc') ? 1 : 0, caps.includes('settings') ? 1 : 0,
+      { owner: 200, head: 200, teamlead: 50, farmer: 50 }[key] ?? 5);
+    for (const entityKey of Object.keys(entities)) {
+      const r = defaultRule(key, entityKey);
+      const hidden = entities[entityKey].fields.filter((f) => (f.hideFor || []).includes(key)).map((f) => f.name);
+      await insert('role_permissions', {
+        role_key: key, entity: entityKey, level: r.level, scope: r.scope,
+        hidden_fields: hidden.join(',') || null,
+      });
+    }
+  }
+  if (missing.length) await refreshRbac();
+  return { added: missing.length };
+}
+
 export async function syncNewEntities() {
   const known = new Set((await all('SELECT DISTINCT entity FROM role_permissions')).map((r) => r.entity));
   const missing = Object.keys(entities).filter((k) => !known.has(k));

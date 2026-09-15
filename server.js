@@ -12,8 +12,9 @@ import { flushQueue, runChecks } from './src/telegram.js';
 import { dbFile, engine, initSchema } from './src/db.js';
 import { bootstrapOwner } from './src/bootstrap.js';
 import { migrate } from './src/migrate.js';
-import { seedRoles, syncNewEntities } from './src/rbac.js';
+import { seedRoles, syncNewEntities, syncNewRoles } from './src/rbac.js';
 import { expireOverdue } from './src/vault.js';
+import { seedProspecting, prospectingChecks } from './src/prospecting.js';
 import { backupDatabase } from './src/backup.js';
 import { captureError, installGlobalHandlers } from './src/errors.js';
 
@@ -80,7 +81,9 @@ installGlobalHandlers();
 await initSchema();
 await migrate();
 await seedRoles();
+await syncNewRoles();
 await syncNewEntities();
+await seedProspecting();
 await bootstrapOwner();
 
 if (process.env.CRM_ROLE !== 'postback') {
@@ -101,6 +104,7 @@ const tick = async () => {
   try {
     await runChecks();
     await expireOverdue();       // протерміновані видачі доступів
+    await prospectingChecks();   // розморозка «не зараз», застій у лідах
     await backupDatabase();      // добова копія бази поруч із самою базою на томі
     await flushQueue();
   } catch (e) { await captureError(e, { logger: 'worker' }); }
