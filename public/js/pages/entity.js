@@ -138,6 +138,58 @@ async function renderLeadsEntity() {
   return wrap;
 }
 
+// Генерик-імпорт CSV: заголовки колонок — підписи полів (як у власному
+// «Експорт CSV» цього розділу), тож export → правки в Excel → import
+// працює як єдиний цикл. Кожен рядок іде через ту саму валідацію/скоуп/
+// хуки, що й ручне створення — помилка одного рядка не зупиняє решту.
+function importModal(entKey, onDone) {
+  const fileInput = el('input', { type: 'file', accept: '.csv,text/csv' });
+  const status = el('div', { style: 'font-size:12.5px;margin-top:10px' });
+  modal(`Імпорт CSV — ${state.meta[entKey].label}`,
+    el('div', {},
+      el('div', { class: 'muted', style: 'font-size:12.5px;margin-bottom:10px' },
+        'Заголовки колонок мають збігатися з назвами полів — простіше всього взяти файл із «Експорт CSV» цього розділу за зразок.'),
+      fileInput, status),
+    [el('button', {
+      class: 'btn primary',
+      onclick: async () => {
+        const file = fileInput.files[0];
+        if (!file) return toast('Оберіть файл', true);
+        const text = await file.text();
+        try {
+          const res = await api.post(`/${entKey}/import`, { csv: text });
+          status.textContent = `Імпортовано: ${res.imported} · пропущено: ${res.skipped}${res.errors.length ? ` · помилок: ${res.errors.length}` : ''}`;
+          if (res.errors.length) {
+            status.append(...res.errors.map((e) => el('div', { class: 'muted' }, `• ${e}`)));
+          }
+          toast(`Імпортовано ${res.imported} записів`);
+          onDone();
+        } catch (e) { toast(e.message, true); }
+      },
+    }, 'Імпортувати')]);
+}
+
+// «+Додати» для послуг веде одразу в ту саму картку-конструктор пакета, що
+// й редагування наявної (serviceCardModal) — а не в голу генерик-форму.
+// Картка вимагає вже наявний id (тягне /costing/services/:id/package), тож
+// спершу тихо створюємо запис лише з назвою, а картку відкриваємо на ньому.
+function newServiceModal(onDone) {
+  const name = el('input', { placeholder: 'Наприклад: Ведення TikTok-акаунта, місяць' });
+  const box = modal('Нова послуга',
+    el('div', { class: 'field' }, el('label', {}, 'Пакети'), name),
+    [el('button', {
+      class: 'btn primary',
+      onclick: async () => {
+        if (!name.value.trim()) return toast('Вкажіть назву', true);
+        try {
+          const res = await api.post('/services', { name: name.value.trim(), status: 'active' });
+          box.remove();
+          serviceCardModal(res.id, onDone);
+        } catch (e) { toast(e.message, true); }
+      },
+    }, 'Створити')]);
+}
+
 async function renderEntityTable(entKey) {
   const ent = state.meta[entKey];
   if (!ent) throw new Error('Розділ недоступний для вашої ролі');
@@ -243,7 +295,11 @@ async function renderEntityTable(entKey) {
         class: 'btn',
         onclick: () => { window.location.href = `/api/${entKey}/export?limit=500`; toast('Експорт записано в аудит-лог'); },
       }, withIcon('download', 'Експорт CSV')) : null,
-      ent.can.create ? el('button', { class: 'btn primary', onclick: () => openForm(entKey, null, load) }, withIcon('plus', 'Додати')) : null));
+      ent.can.create ? el('button', { class: 'btn', onclick: () => importModal(entKey, load) }, withIcon('upload', 'Імпорт CSV')) : null,
+      ent.can.create ? el('button', {
+        class: 'btn primary',
+        onclick: () => (entKey === 'services' ? newServiceModal(load) : openForm(entKey, null, load)),
+      }, withIcon('plus', 'Додати')) : null));
 
   search.addEventListener('keydown', (e) => { if (e.key === 'Enter') { filters.offset = 0; load(); } });
   box.append(toolbar, el('div', { class: 'card' }, tableWrap, pager));

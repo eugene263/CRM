@@ -1204,3 +1204,25 @@ test('/api/meta повертає недоступні розділи окрем�
   assert.equal(locked.label, 'Поточні клієнти');
   assert.ok(!('fields' in locked) && !('can' in locked), 'у замкненому пункті немає полів чи прав — лише назва, група й іконка');
 });
+
+test('генерик-імпорт CSV створює записи за підписами полів і пропускає биті рядки', async () => {
+  const csv = 'Назва,Вертикаль,Гео\n"Офер А","nutra","US"\n"Офер Б","dating","DE"\n,,\n';
+  const res = await call('/api/offers/import', { method: 'POST', body: { csv } });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.imported, 2);
+  assert.equal(res.data.skipped, 1, 'порожній рядок пропущено, а не впав як помилка');
+  assert.equal(res.data.errors.length, 0);
+
+  const list = await call('/api/offers?q=Офер');
+  const names = list.data.rows.map((r) => r.name);
+  assert.ok(names.includes('Офер А') && names.includes('Офер Б'));
+
+  const badCsv = 'Назва\n\n'; // немає жодного заповненого рядка окрім заголовка
+  const empty = await call('/api/offers/import', { method: 'POST', body: { csv: badCsv } });
+  assert.equal(empty.status, 200);
+  assert.equal(empty.data.imported, 0);
+
+  assert.equal((await call('/api/leads/import', {
+    method: 'POST', as: 'finance', body: { csv: 'Бізнес\nТест\n' },
+  })).status, 403, 'фінансист не має прав створювати лідів — і імпортувати теж');
+});

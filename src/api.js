@@ -303,6 +303,68 @@ function csv(rows, fields, user) {
   return `${mark}\n${header}\n${body}\n`;
 }
 
+// Розбирає один рядок CSV із підтримкою лапок і "" як екранованої лапки
+// всередині поля — сумісно з форматом, який видає csv() вище.
+function parseCsvLine(line) {
+  const cells = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const c = line[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i += 1; } else { inQuotes = false; }
+      } else cur += c;
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ',') {
+      cells.push(cur); cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  cells.push(cur);
+  return cells;
+}
+
+// Генерик-імпорт CSV для будь-якої сутності: заголовки — підписи полів (як
+// у власному export) або технічні назви полів; кожен рядок іде через
+// createEntityRecord, тож ті самі права/скоуп/валідація/хуки, що й ручне
+// створення через форму. Помилка одного рядка не зупиняє решту — так само,
+// як уже було зроблено для importConversions.
+async function importRows(user, entKey, text, ip) {
+  const ent = entities[entKey];
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() && !l.startsWith('#'));
+  if (!lines.length) return { imported: 0, skipped: 0, errors: ['Порожній файл'] };
+
+  const writable = ent.fields.filter((f) => !f.readOnly && !f.virtual && f.type !== 'secret');
+  const byLabel = new Map(writable.map((f) => [f.label, f.name]));
+  const byName = new Map(writable.map((f) => [f.name, f.name]));
+  const header = parseCsvLine(lines[0]).map((h) => h.trim());
+  const columns = header.map((h) => byLabel.get(h) || byName.get(h) || null);
+  if (!columns.some(Boolean)) {
+    return { imported: 0, skipped: 0, errors: ['Жоден заголовок CSV не збігається з полями цієї сутності'] };
+  }
+
+  let imported = 0, skipped = 0;
+  const errors = [];
+  for (const line of lines.slice(1)) {
+    if (!line.trim()) continue;
+    const cells = parseCsvLine(line);
+    const data = {};
+    columns.forEach((name, i) => { if (name && cells[i]) data[name] = cells[i]; });
+    if (!Object.keys(data).length) { skipped += 1; continue; }
+    try {
+      await createEntityRecord(user, entKey, data, ip);
+      imported += 1;
+    } catch (e) {
+      errors.push(`${line.slice(0, 80)}: ${e.message}`);
+    }
+  }
+  await audit({ user_id: user.id, action: 'import', entity: entKey, payload: { imported, skipped }, ip });
+  return { imported, skipped, errors: errors.slice(0, 20) };
+}
+
 // ── Роутер ────────────────────────────────────────────────────────────────
 export async function handleApi(req, res, url) {
   const seg = url.pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean);
@@ -785,6 +847,18 @@ export async function handleApi(req, res, url) {
       'content-type': 'text/csv; charset=utf-8',
       'content-disposition': `attachment; filename="${entKey}-${new Date().toISOString().slice(0, 10)}.csv"`,
     });
+  }
+
+  // /api/:entity/import — той самий CSV-формат, що видає export цієї
+  // сутності (заголовки — підписи полів), тож export → правки в Excel →
+  // import працює як єдиний цикл.
+  if (seg[1] === 'import' && req.method === 'POST') {
+    if (!can(user, entKey, 'create')) {
+      await audit({ user_id: user.id, action: 'denied_import', entity: entKey, ip });
+      return fail(res, 403, 'Немає прав на створення для цього розділу');
+    }
+    const body = await readBody(req);
+    return ok(res, await importRows(user, entKey, String(body.csv || ''), ip));
   }
 
   const id = Number(seg[1]);
