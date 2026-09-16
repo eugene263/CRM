@@ -9,10 +9,19 @@ import { entities } from './entities.js';
 import { can, visibleFields } from './rbac.js';
 import { listEntityRows, createEntityRecord, updateEntityRecord } from './api.js';
 import { hasGeminiKeys, geminiRequest } from './ai.js';
+import { hasWebSearch, webSearch } from './webSearch.js';
 
-const SYSTEM_PROMPT = `Ти — AI-асистент у CRM Gennect. Ти можеш переглядати й змінювати дані через надані інструменти (list_entities, describe_entity, find_records, create_record, update_record). Ці інструменти автоматично враховують права поточного користувача — якщо інструмент відмовив через брак прав, повідом про це користувачу, а не шукай обхідний шлях.
+// Google Search grounding у самому Gemini вимагає платного білінгу навіть за
+// один пошуковий запит (перевірено напряму на реальних ключах — 429 «check
+// your plan and billing» щоразу, коли в tools є google_search) — тому
+// реальний веб-пошук підключений окремо через Tavily (безкоштовний рівень,
+// без картки), як ще один інструмент у тому самому function-calling циклі.
+function systemPrompt() {
+  const webSearchLine = hasWebSearch()
+    ? '\n\nУ тебе Є доступ до реального веб-пошуку через інструмент web_search (короткі фрагменти сторінок, не повний текст). Використовуй його, коли задача вимагає перевірити чи знайти реальний факт з інтернету (сайт, контакти, чи існує компанія тощо) — і все одно чітко познач у відповіді, що дані знайдені пошуком і варті ручної перевірки, а не видавай їх як стовідсотково підтверджені.'
+    : '\n\nКРИТИЧНО ВАЖЛИВО: у тебе немає доступу до інтернету, пошуку чи будь-якої зовнішньої бази даних — тільки до того, що вже є в CRM через інструменти. Якщо задача вимагає реальних фактів, яких там немає (знайти телефон/email/сайт конкретного бізнесу, перевірити, чи компанія існує, тощо) — НІКОЛИ не вигадуй правдоподібні значення й не записуй їх у CRM як факт. Чесно скажи користувачу, що в тебе немає способу це реально знайти, і запропонуй, що можеш замість цього (наприклад, показати, яких контактів бракує, або структурувати те, що користувач сам надасть).';
 
-КРИТИЧНО ВАЖЛИВО: у тебе немає доступу до інтернету, пошуку чи будь-якої зовнішньої бази даних — тільки до того, що вже є в CRM через інструменти. Якщо задача вимагає реальних фактів, яких там немає (знайти телефон/email/сайт конкретного бізнесу, перевірити, чи компанія існує, тощо) — НІКОЛИ не вигадуй правдоподібні значення й не записуй їх у CRM як факт. Чесно скажи користувачу, що в тебе немає способу це реально знайти, і запропонуй, що можеш замість цього (наприклад, показати, яких контактів бракує, або структурувати те, що користувач сам надасть).
+  return `Ти — AI-асистент у CRM Gennect. Ти можеш переглядати й змінювати дані через надані інструменти (list_entities, describe_entity, find_records, create_record, update_record). Ці інструменти автоматично враховують права поточного користувача — якщо інструмент відмовив через брак прав, повідом про це користувачу, а не шукай обхідний шлях.${webSearchLine}
 
 Правила:
 - Перш ніж створити чи оновити запис у сутності, якщо не певен точних назв полів, виклич describe_entity.
@@ -20,9 +29,10 @@ const SYSTEM_PROMPT = `Ти — AI-асистент у CRM Gennect. Ти мож�
 - Коли дію виконано, коротко підтверди природною мовою, що саме зроблено і з якими значеннями.
 - Якщо інструмент повернув помилку — поясни її користувачу простими словами.
 - Відповідай українською, стисло і по суті.`;
+}
 
-const TOOLS = [{
-  functionDeclarations: [
+function tools() {
+  const declarations = [
     {
       name: 'list_entities',
       description: 'Список розділів CRM, доступних користувачу для читання, з правами на створення/редагування.',
@@ -69,8 +79,20 @@ const TOOLS = [{
         required: ['entity', 'id', 'fields_json'],
       },
     },
-  ],
-}];
+  ];
+  if (hasWebSearch()) {
+    declarations.push({
+      name: 'web_search',
+      description: 'Реальний пошук в інтернеті (Tavily) — короткі фрагменти сторінок і посилання. Використовуй, коли треба перевірити чи знайти факт, якого немає в CRM.',
+      parameters: {
+        type: 'OBJECT',
+        properties: { query: { type: 'STRING' } },
+        required: ['query'],
+      },
+    });
+  }
+  return [{ functionDeclarations: declarations }];
+}
 
 async function runTool(user, name, args) {
   try {
@@ -106,6 +128,9 @@ async function runTool(user, name, args) {
       const row = await updateEntityRecord(user, args.entity, Number(args.id), fields, null);
       return { ok: true, row };
     }
+    if (name === 'web_search') {
+      return await webSearch(args.query);
+    }
     return { error: 'Невідомий інструмент' };
   } catch (e) {
     return { error: e.message || 'Помилка виконання' };
@@ -126,7 +151,7 @@ export async function runAiChat(user, messages) {
 
   const actions = [];
   for (let step = 0; step < MAX_STEPS; step += 1) {
-    const data = await geminiRequest({ systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] }, tools: TOOLS, contents });
+    const data = await geminiRequest({ systemInstruction: { parts: [{ text: systemPrompt() }] }, tools: tools(), contents });
     const parts = data.candidates?.[0]?.content?.parts || [];
     const calls = parts.filter((p) => p.functionCall);
     if (!calls.length) {
