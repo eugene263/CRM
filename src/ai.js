@@ -13,6 +13,13 @@ export function hasGeminiKeys() {
 
 let geminiKeyCursor = 0;
 
+// 429 — вичерпано ліміт саме цього ключа, тому одразу пробуємо наступний.
+// 503 — модель тимчасово перевантажена на боці Google (не залежить від
+// ключа), тому по всьому колу ключів даємо ще один прохід з невеликою
+// паузою, перш ніж чесно повідомити користувачу про збій.
+const RETRYABLE = new Set([429, 503]);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function geminiRequest(body) {
   const model = 'gemini-3.6-flash';
   const keys = geminiKeys();
@@ -20,20 +27,23 @@ export async function geminiRequest(body) {
     throw Object.assign(new Error('Gemini не налаштовано: додайте GEMINI_API_KEY(S)'), { status: 400 });
   }
   let lastError;
-  for (let i = 0; i < keys.length; i += 1) {
-    const apiKey = keys[(geminiKeyCursor + i) % keys.length];
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify(body),
-    });
-    if (res.ok) {
-      geminiKeyCursor = (geminiKeyCursor + i + 1) % keys.length;
-      return res.json();
+  for (let round = 0; round < 2; round += 1) {
+    for (let i = 0; i < keys.length; i += 1) {
+      const apiKey = keys[(geminiKeyCursor + i) % keys.length];
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        geminiKeyCursor = (geminiKeyCursor + i + 1) % keys.length;
+        return res.json();
+      }
+      const text = await res.text();
+      lastError = Object.assign(new Error(`AI: помилка Gemini API (${res.status}): ${text.slice(0, 300)}`), { status: 502 });
+      if (!RETRYABLE.has(res.status)) throw lastError;
     }
-    const text = await res.text();
-    lastError = Object.assign(new Error(`AI: помилка Gemini API (${res.status}): ${text.slice(0, 300)}`), { status: 502 });
-    if (res.status !== 429) throw lastError;
+    if (round === 0) await sleep(800);
   }
   throw lastError;
 }
