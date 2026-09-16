@@ -631,7 +631,7 @@ export const entities = {
     fields: [
       { name: 'name', label: 'Послуга', type: 'text', required: true, list: true },
       { name: 'is_package', label: 'Тип', type: 'select', list: true, readOnly: true, options: S(
-        ['0', 'Послуга'], ['1', 'Пакет']) },
+        ['0', 'Послуги'], ['1', 'Пакети']) },
       { name: 'category', label: 'Категорія', type: 'text', list: true },
       { name: 'unit', label: 'Одиниця', type: 'text', list: true },
       { name: 'price', label: 'Ціна, $', type: 'money', list: true, hint: 'Для пакета рахується автоматично із вкладених послуг' },
