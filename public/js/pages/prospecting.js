@@ -189,7 +189,8 @@ function statusForm(lead, onChange) {
 }
 
 // ── Додавання лідів ───────────────────────────────────────────────────────
-function addForm(onChange) {
+export async function addForm(onChange, presetListId = null) {
+  await loadDicts();
   const name = el('input', { placeholder: 'Назва бізнесу' });
   const site = el('input', { placeholder: 'сайт або посилання на профіль' });
   const city = el('input', { placeholder: 'місто' });
@@ -197,8 +198,11 @@ function addForm(onChange) {
   const followers = el('input', { type: 'number', placeholder: 'підписники' });
   const lastPost = el('input', { type: 'date' });
   const amount = el('input', { type: 'number', step: '0.01', placeholder: '0' });
-  const list = el('select', {}, el('option', { value: '' }, 'без списку'),
-    ...(state.refs.prospect_lists || []).map((l) => el('option', { value: l.id }, l.label)));
+  const list = presetListId
+    ? el('select', { disabled: true }, el('option', { value: presetListId, selected: true },
+        (state.refs.prospect_lists || []).find((l) => String(l.id) === String(presetListId))?.label || `#${presetListId}`))
+    : el('select', {}, el('option', { value: '' }, 'без списку'),
+      ...(state.refs.prospect_lists || []).map((l) => el('option', { value: l.id }, l.label)));
   const channel = el('select', {}, ...dictOf('source_channel').map((d) => el('option', { value: d.code }, d.label)));
   const queryInput = el('input', { placeholder: 'запит або хештег: кавʼярні Львів' });
   const signals = ['ллє рекламу', 'наймає SMM', 'мертвий акаунт'].map((label) => {

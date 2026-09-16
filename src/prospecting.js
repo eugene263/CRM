@@ -411,7 +411,8 @@ export async function listContacts(listId, scopeSql, scopeParams) {
     `SELECT l.id AS lead_id, l.company_name, l.tags,
             COALESCE(lc.person_name, l.company_name) AS name,
             MAX(CASE WHEN lc.kind='email' THEN lc.value END) AS email,
-            MAX(CASE WHEN lc.kind='phone' THEN lc.value END) AS phone
+            MAX(CASE WHEN lc.kind='phone' THEN lc.value END) AS phone,
+            MAX(lc.position) AS position
        FROM lead_contacts lc JOIN leads l ON l.id = lc.lead_id
       WHERE l.list_id = ? AND ${scopeSql}
       GROUP BY l.id, COALESCE(lc.person_name, l.company_name)

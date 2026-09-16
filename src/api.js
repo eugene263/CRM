@@ -242,6 +242,7 @@ async function refOptions(user) {
   const titles = {
     users: 'name', teams: 'name', accounts: 'nickname', devices: 'model', sims: 'number',
     proxies: 'host', mail_accounts: 'login', offers: 'name', partners: 'name', creatives: 'title', posts: 'url',
+    prospect_lists: 'name',
   };
   for (const [key, col] of Object.entries(titles)) {
     if (!can(user, key, 'read')) continue;
