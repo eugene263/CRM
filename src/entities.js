@@ -5,7 +5,7 @@ const S = (...v) => v.map((x) => (Array.isArray(x) ? { value: x[0], label: x[1] 
 export const entities = {
   // ── Команда ────────────────────────────────────────────────────────────
   users: {
-    label: 'Користувачі', group: 'Команда', icon: '👤', teamField: 'team_id', ownField: 'id',
+    label: 'Користувачі', group: 'Команда', icon: 'user', teamField: 'team_id', ownField: 'id',
     title: 'name',
     fields: [
       { name: 'name', label: 'Імʼя', type: 'text', required: true, list: true },
@@ -21,7 +21,7 @@ export const entities = {
     ],
   },
   teams: {
-    label: 'Команди', group: 'Команда', icon: '👥', title: 'name',
+    label: 'Команди', group: 'Команда', icon: 'users', title: 'name',
     fields: [
       { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
       { name: 'lead_user_id', label: 'Тімлід', type: 'ref', ref: 'users', list: true },
@@ -31,7 +31,7 @@ export const entities = {
 
   // ── Ресурси ────────────────────────────────────────────────────────────
   accounts: {
-    label: 'Акаунти', group: 'Ресурси', icon: '📱', ownField: 'owner_user_id', teamField: 'team_id',
+    label: 'Акаунти', group: 'Ресурси', icon: 'phone', ownField: 'owner_user_id', teamField: 'team_id',
     title: 'nickname',
     fields: [
       { name: 'platform', label: 'Платформа', type: 'select', required: true, list: true, options: S(
@@ -59,7 +59,7 @@ export const entities = {
     ],
   },
   devices: {
-    label: 'Девайси', group: 'Ресурси', icon: '📟', title: 'model',
+    label: 'Девайси', group: 'Ресурси', icon: 'device', title: 'model',
     fields: [
       { name: 'model', label: 'Модель', type: 'text', required: true, list: true },
       { name: 'imei', label: 'IMEI', type: 'text', list: true },
@@ -72,7 +72,7 @@ export const entities = {
     ],
   },
   sims: {
-    label: 'SIM-карти', group: 'Ресурси', icon: '📶', title: 'number',
+    label: 'SIM-карти', group: 'Ресурси', icon: 'sim', title: 'number',
     fields: [
       { name: 'number', label: 'Номер', type: 'text', required: true, list: true },
       { name: 'operator', label: 'Оператор', type: 'text', list: true },
@@ -85,7 +85,7 @@ export const entities = {
     ],
   },
   proxies: {
-    label: 'Проксі', group: 'Ресурси', icon: '🌐', title: 'host',
+    label: 'Проксі', group: 'Ресурси', icon: 'globe', title: 'host',
     fields: [
       { name: 'kind', label: 'Тип', type: 'select', list: true, options: S(
         ['mobile', 'Мобільний'], ['residential', 'Резидентський'], ['datacenter', 'Датацентр']) },
@@ -101,7 +101,7 @@ export const entities = {
     ],
   },
   mail_accounts: {
-    label: 'Пошти', group: 'Ресурси', icon: '✉️', title: 'login',
+    label: 'Пошти', group: 'Ресурси', icon: 'mail', title: 'login',
     fields: [
       { name: 'login', label: 'Логін', type: 'text', required: true, list: true },
       { name: 'password_enc', label: 'Пароль', type: 'secret' },
@@ -113,7 +113,7 @@ export const entities = {
     ],
   },
   resource_assignments: {
-    label: 'Видача ресурсів', group: 'Ресурси', icon: '🔁', ownField: 'user_id', defaultSort: 'created_at DESC',
+    label: 'Видача ресурсів', group: 'Ресурси', icon: 'swap', ownField: 'user_id', defaultSort: 'created_at DESC',
     fields: [
       { name: 'resource_type', label: 'Тип', type: 'select', required: true, list: true, options: S(
         ['account', 'Акаунт'], ['device', 'Девайс'], ['sim', 'SIM'], ['proxy', 'Проксі'], ['mail_account', 'Пошта']) },
@@ -127,7 +127,7 @@ export const entities = {
 
   // ── Контент ────────────────────────────────────────────────────────────
   creatives: {
-    label: 'Креативи', group: 'Контент', icon: '🎬', ownField: 'author_user_id', teamField: 'team_id', title: 'title',
+    label: 'Креативи', group: 'Контент', icon: 'film', ownField: 'author_user_id', teamField: 'team_id', title: 'title',
     fields: [
       { name: 'title', label: 'Назва', type: 'text', required: true, list: true },
       { name: 'vertical', label: 'Вертикаль', type: 'text', list: true },
@@ -149,7 +149,7 @@ export const entities = {
     ],
   },
   creative_versions: {
-    label: 'Версії креативів', group: 'Контент', icon: '🗂', ownField: 'user_id', defaultSort: 'created_at DESC',
+    label: 'Версії креативів', group: 'Контент', icon: 'layers', ownField: 'user_id', defaultSort: 'created_at DESC',
     fields: [
       { name: 'creative_id', label: 'Креатив', type: 'ref', ref: 'creatives', required: true, list: true },
       { name: 'version', label: 'Версія', type: 'number', list: true },
@@ -160,7 +160,7 @@ export const entities = {
     ],
   },
   tasks: {
-    label: 'Задачі', group: 'Контент', icon: '✅', ownField: 'assignee_user_id', title: 'title',
+    label: 'Задачі', group: 'Контент', icon: 'check', ownField: 'assignee_user_id', title: 'title',
     fields: [
       { name: 'title', label: 'Задача', type: 'text', required: true, list: true },
       { name: 'description', label: 'ТЗ', type: 'textarea' },
@@ -176,7 +176,7 @@ export const entities = {
 
   // ── Заливи ─────────────────────────────────────────────────────────────
   posts: {
-    label: 'Публікації', group: 'Заливи', icon: '📤', ownField: 'user_id', teamField: 'team_id', defaultSort: 'posted_at DESC',
+    label: 'Публікації', group: 'Заливи', icon: 'send', ownField: 'user_id', teamField: 'team_id', defaultSort: 'posted_at DESC',
     fields: [
       { name: 'posted_at', label: 'Дата', type: 'datetime', list: true, required: true },
       { name: 'account_id', label: 'Акаунт', type: 'ref', ref: 'accounts', required: true, list: true },
@@ -197,7 +197,7 @@ export const entities = {
 
   // ── Монетизація ────────────────────────────────────────────────────────
   partners: {
-    label: 'Партнерки', group: 'Монетизація', icon: '🤝', title: 'name',
+    label: 'Партнерки', group: 'Монетизація', icon: 'handshake', title: 'name',
     fields: [
       { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
       { name: 'contact', label: 'Контакт', type: 'text', list: true },
@@ -209,7 +209,7 @@ export const entities = {
     ],
   },
   offers: {
-    label: 'Офери', group: 'Монетизація', icon: '🎯', title: 'name',
+    label: 'Офери', group: 'Монетизація', icon: 'target', title: 'name',
     fields: [
       { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
       { name: 'partner_id', label: 'Партнерка', type: 'ref', ref: 'partners', list: true, hideFor: ['creator', 'editor'] },
@@ -226,7 +226,7 @@ export const entities = {
     ],
   },
   offer_rates_history: {
-    label: 'Історія ставок', group: 'Монетизація', icon: '📈', defaultSort: 'created_at DESC',
+    label: 'Історія ставок', group: 'Монетизація', icon: 'trending', defaultSort: 'created_at DESC',
     fields: [
       { name: 'offer_id', label: 'Офер', type: 'ref', ref: 'offers', list: true },
       { name: 'payout', label: 'Ставка, $', type: 'money', list: true, hideFor: ['creator', 'editor', 'farmer'] },
@@ -235,7 +235,7 @@ export const entities = {
     ],
   },
   tracking_links: {
-    label: 'Трекінг-лінки', group: 'Монетизація', icon: '🔗', ownField: 'user_id', defaultSort: 'created_at DESC',
+    label: 'Трекінг-лінки', group: 'Монетизація', icon: 'link', ownField: 'user_id', defaultSort: 'created_at DESC',
     fields: [
       { name: 'slug', label: 'Slug', type: 'text', readOnly: true, list: true },
       { name: 'offer_id', label: 'Офер', type: 'ref', ref: 'offers', required: true, list: true },
@@ -249,7 +249,7 @@ export const entities = {
     ],
   },
   conversions: {
-    label: 'Конверсії', group: 'Монетизація', icon: '💸', ownField: 'user_id', defaultSort: 'converted_at DESC',
+    label: 'Конверсії', group: 'Монетизація', icon: 'coins', ownField: 'user_id', defaultSort: 'converted_at DESC',
     fields: [
       { name: 'converted_at', label: 'Дата', type: 'datetime', list: true },
       { name: 'event', label: 'Подія', type: 'select', list: true, options: S(
@@ -272,7 +272,7 @@ export const entities = {
 
   // ── Фінанси ────────────────────────────────────────────────────────────
   expenses: {
-    label: 'Витрати', group: 'Фінанси', icon: '🧾', teamField: 'team_id', defaultSort: 'spent_at DESC',
+    label: 'Витрати', group: 'Фінанси', icon: 'receipt', teamField: 'team_id', defaultSort: 'spent_at DESC',
     fields: [
       { name: 'spent_at', label: 'Дата', type: 'date', required: true, list: true },
       { name: 'category', label: 'Категорія', type: 'select', required: true, list: true, options: S(
@@ -288,7 +288,7 @@ export const entities = {
     ],
   },
   salary_rules: {
-    label: 'Правила ЗП', group: 'Фінанси', icon: '📐',
+    label: 'Правила ЗП', group: 'Фінанси', icon: 'ruler',
     fields: [
       { name: 'user_id', label: 'Співробітник', type: 'ref', ref: 'users', list: true },
       { name: 'role', label: 'Або роль', type: 'text', list: true, hint: 'якщо правило для всієї ролі' },
@@ -303,7 +303,7 @@ export const entities = {
     ],
   },
   payouts: {
-    label: 'Виплати команді', group: 'Фінанси', icon: '💰', ownField: 'user_id', defaultSort: 'period DESC',
+    label: 'Виплати команді', group: 'Фінанси', icon: 'wallet', ownField: 'user_id', defaultSort: 'period DESC',
     fields: [
       { name: 'period', label: 'Період', type: 'text', required: true, list: true, hint: 'YYYY-MM' },
       { name: 'user_id', label: 'Співробітник', type: 'ref', ref: 'users', required: true, list: true },
@@ -318,7 +318,7 @@ export const entities = {
     ],
   },
   kpi_targets: {
-    label: 'KPI-плани', group: 'Фінанси', icon: '🎚', ownField: 'user_id',
+    label: 'KPI-плани', group: 'Фінанси', icon: 'gauge', ownField: 'user_id',
     fields: [
       { name: 'user_id', label: 'Співробітник', type: 'ref', ref: 'users', required: true, list: true },
       { name: 'period', label: 'Період', type: 'text', required: true, list: true, hint: 'YYYY-MM або YYYY-MM-DD' },
@@ -331,7 +331,7 @@ export const entities = {
 
   // ── Пошук клієнтів ─────────────────────────────────────────────────────
   prospect_lists: {
-    label: 'Списки пошуку', group: 'Пошук клієнтів', icon: '🗂', ownField: 'owner_user_id', teamField: 'team_id', title: 'name',
+    label: 'Списки пошуку', group: 'Пошук клієнтів', icon: 'layers', ownField: 'owner_user_id', teamField: 'team_id', title: 'name',
     fields: [
       { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
       { name: 'description', label: 'Гіпотеза / опис', type: 'textarea' },
@@ -351,7 +351,7 @@ export const entities = {
     ],
   },
   leads: {
-    label: 'Ліди', group: 'Пошук клієнтів', icon: '🎯', ownField: 'owner_user_id', teamField: 'team_id', title: 'company_name',
+    label: 'Ліди', group: 'Пошук клієнтів', icon: 'target', ownField: 'owner_user_id', teamField: 'team_id', title: 'company_name',
     defaultSort: 'created_at DESC',
     fields: [
       { name: 'company_name', label: 'Бізнес', type: 'text', required: true, list: true },
@@ -382,7 +382,7 @@ export const entities = {
     ],
   },
   touches: {
-    label: 'Тачі', group: 'Пошук клієнтів', icon: '✉️', ownField: 'user_id', readOnlyEntity: true, defaultSort: 'sent_at DESC',
+    label: 'Тачі', group: 'Пошук клієнтів', icon: 'mail', ownField: 'user_id', readOnlyEntity: true, defaultSort: 'sent_at DESC',
     fields: [
       { name: 'sent_at', label: 'Коли', type: 'datetime', list: true },
       { name: 'lead_id', label: 'Лід', type: 'ref', ref: 'leads', list: true },
@@ -397,7 +397,7 @@ export const entities = {
     ],
   },
   message_templates: {
-    label: 'Шаблони повідомлень', group: 'Пошук клієнтів', icon: '📝', title: 'name',
+    label: 'Шаблони повідомлень', group: 'Пошук клієнтів', icon: 'fileText', title: 'name',
     fields: [
       { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
       { name: 'channel', label: 'Канал', type: 'text', list: true },
@@ -408,7 +408,7 @@ export const entities = {
     ],
   },
   lead_statuses: {
-    label: 'Статуси лідів', group: 'Пошук клієнтів', icon: '🚦', title: 'name', defaultSort: 'sort_order ASC',
+    label: 'Статуси лідів', group: 'Пошук клієнтів', icon: 'flag', title: 'name', defaultSort: 'sort_order ASC',
     fields: [
       { name: 'code', label: 'Код', type: 'text', required: true, list: true },
       { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
@@ -420,7 +420,7 @@ export const entities = {
     ],
   },
   dictionaries: {
-    label: 'Довідники', group: 'Пошук клієнтів', icon: '📚', title: 'label', defaultSort: 'kind ASC',
+    label: 'Довідники', group: 'Пошук клієнтів', icon: 'book', title: 'label', defaultSort: 'kind ASC',
     fields: [
       { name: 'kind', label: 'Довідник', type: 'select', required: true, list: true, options: S(
         ['source_channel', 'Канали джерел'], ['touch_channel', 'Канали звʼязку'],
@@ -432,7 +432,7 @@ export const entities = {
     ],
   },
   suppression_list: {
-    label: 'Чорний список', group: 'Пошук клієнтів', icon: '🚷', defaultSort: 'created_at DESC',
+    label: 'Чорний список', group: 'Пошук клієнтів', icon: 'ban', defaultSort: 'created_at DESC',
     fields: [
       { name: 'kind', label: 'Тип', type: 'select', required: true, list: true, options: S(
         ['domain', 'Домен'], ['email', 'Email'], ['phone', 'Телефон'], ['instagram', 'Instagram'], ['company', 'Назва']) },
@@ -445,7 +445,7 @@ export const entities = {
 
   // ── Плани та норми ─────────────────────────────────────────────────────
   kpi_plans: {
-    label: 'Плани та норми', group: 'Плани', icon: '🎚', ownField: 'user_id', teamField: 'team_id',
+    label: 'Плани та норми', group: 'Плани', icon: 'gauge', ownField: 'user_id', teamField: 'team_id',
     defaultSort: 'period_start DESC',
     fields: [
       { name: 'user_id', label: 'Співробітник', type: 'ref', ref: 'users', list: true },
@@ -463,7 +463,7 @@ export const entities = {
     ],
   },
   channel_limits: {
-    label: 'Ліміти акаунтів', group: 'Плани', icon: '🚦', ownField: 'user_id', title: 'account_name',
+    label: 'Ліміти акаунтів', group: 'Плани', icon: 'flag', ownField: 'user_id', title: 'account_name',
     fields: [
       { name: 'account_name', label: 'Акаунт / скринька', type: 'text', required: true, list: true },
       { name: 'channel', label: 'Канал', type: 'select', required: true, list: true, options: S(
@@ -477,7 +477,7 @@ export const entities = {
     ],
   },
   work_calendar: {
-    label: 'Робочий календар', group: 'Плани', icon: '📅', ownField: 'user_id', defaultSort: 'date DESC',
+    label: 'Робочий календар', group: 'Плани', icon: 'calendar', ownField: 'user_id', defaultSort: 'date DESC',
     fields: [
       { name: 'user_id', label: 'Співробітник', type: 'ref', ref: 'users', required: true, list: true },
       { name: 'date', label: 'Дата', type: 'date', required: true, list: true },
@@ -489,7 +489,7 @@ export const entities = {
     ],
   },
   ramp_up_plans: {
-    label: 'Рампап новачків', group: 'Плани', icon: '📈', ownField: 'user_id', defaultSort: 'week_number ASC',
+    label: 'Рампап новачків', group: 'Плани', icon: 'trending', ownField: 'user_id', defaultSort: 'week_number ASC',
     fields: [
       { name: 'user_id', label: 'Співробітник', type: 'ref', ref: 'users', list: true },
       { name: 'role', label: 'Або роль', type: 'text', list: true },
@@ -499,7 +499,7 @@ export const entities = {
     ],
   },
   bonus_rules: {
-    label: 'Бонуси за норму', group: 'Плани', icon: '🏅', ownField: 'user_id',
+    label: 'Бонуси за норму', group: 'Плани', icon: 'award', ownField: 'user_id',
     defaultSort: 'threshold_percent DESC',
     fields: [
       { name: 'role', label: 'Роль', type: 'text', list: true },
@@ -513,7 +513,7 @@ export const entities = {
     ],
   },
   quality_flags: {
-    label: 'Позначки браку', group: 'Плани', icon: '⚠️', ownField: 'user_id', readOnlyEntity: true,
+    label: 'Позначки браку', group: 'Плани', icon: 'alert', ownField: 'user_id', readOnlyEntity: true,
     defaultSort: 'created_at DESC',
     fields: [
       { name: 'created_at', label: 'Коли', type: 'datetime', list: true },
@@ -528,7 +528,7 @@ export const entities = {
   credentials: {
     // «Свої» для сейфа — це видані на руки, а не створені: крієйтор має
     // бачити рівно те, що йому виписали.
-    label: 'Сейф доступів', group: 'Доступи', icon: '🔐', ownField: 'holder_user_id', teamField: 'team_id', title: 'title',
+    label: 'Сейф доступів', group: 'Доступи', icon: 'lock', ownField: 'holder_user_id', teamField: 'team_id', title: 'title',
     fields: [
       { name: 'title', label: 'Назва', type: 'text', required: true, list: true },
       { name: 'kind', label: 'Тип', type: 'select', required: true, list: true, options: S(
@@ -557,7 +557,7 @@ export const entities = {
     ],
   },
   credential_grants: {
-    label: 'Видача доступів', group: 'Доступи', icon: '🪪', ownField: 'user_id', defaultSort: 'granted_at DESC',
+    label: 'Видача доступів', group: 'Доступи', icon: 'idCard', ownField: 'user_id', defaultSort: 'granted_at DESC',
     readOnlyEntity: true,
     fields: [
       { name: 'credential_id', label: 'Доступ', type: 'ref', ref: 'credentials', list: true },
@@ -574,7 +574,7 @@ export const entities = {
     ],
   },
   access_requests: {
-    label: 'Запити на доступ', group: 'Доступи', icon: '🙋', ownField: 'user_id', defaultSort: 'created_at DESC',
+    label: 'Запити на доступ', group: 'Доступи', icon: 'hand', ownField: 'user_id', defaultSort: 'created_at DESC',
     fields: [
       { name: 'credential_id', label: 'Доступ', type: 'ref', ref: 'credentials', required: true, list: true },
       { name: 'user_id', label: 'Хто просить', type: 'ref', ref: 'users', list: true, readOnly: true },
@@ -587,9 +587,40 @@ export const entities = {
     ],
   },
 
+  // ── Собівартість ───────────────────────────────────────────────────────
+  services: {
+    label: 'Послуги та ціни', group: 'Фінанси', icon: 'calculator', title: 'name',
+    fields: [
+      { name: 'name', label: 'Послуга', type: 'text', required: true, list: true },
+      { name: 'category', label: 'Категорія', type: 'text', list: true },
+      { name: 'unit', label: 'Одиниця', type: 'text', list: true },
+      { name: 'price', label: 'Ціна, $', type: 'money', list: true },
+      { name: 'target_margin', label: 'Цільова маржа, %', type: 'number', list: true },
+      { name: 'volume_per_month', label: 'Обсяг/міс', type: 'number', list: true },
+      { name: 'currency', label: 'Валюта', type: 'text' },
+      { name: 'description', label: 'Опис', type: 'textarea' },
+      { name: 'status', label: 'Статус', type: 'select', list: true, options: S(
+        ['active', 'Активна'], ['draft', 'Чернетка'], ['archived', 'Архів']) },
+    ],
+  },
+  cost_rates: {
+    label: 'Ставки собівартості', group: 'Фінанси', icon: 'ruler', title: 'name',
+    fields: [
+      { name: 'code', label: 'Код', type: 'text', required: true, list: true },
+      { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
+      { name: 'kind', label: 'Тип', type: 'select', required: true, list: true, options: S(
+        ['labor', 'Робота'], ['resource', 'Ресурс'], ['subscription', 'Підписка'], ['overhead', 'Накладні']) },
+      { name: 'unit', label: 'Одиниця', type: 'text', list: true },
+      { name: 'amount', label: 'Ставка', type: 'money', required: true, list: true },
+      { name: 'currency', label: 'Валюта', type: 'text' },
+      { name: 'note', label: 'Нотатка', type: 'text' },
+      { name: 'is_active', label: 'Активна', type: 'number', list: true },
+    ],
+  },
+
   // ── Службові ───────────────────────────────────────────────────────────
   clicks: {
-    label: 'Кліки', group: 'Службові', icon: '🖱', readOnlyEntity: true, defaultSort: 'created_at DESC',
+    label: 'Кліки', group: 'Службові', icon: 'pointer', readOnlyEntity: true, defaultSort: 'created_at DESC',
     fields: [
       { name: 'created_at', label: 'Коли', type: 'datetime', list: true },
       { name: 'tracking_link_id', label: 'Лінк', type: 'ref', ref: 'tracking_links', list: true },
@@ -602,7 +633,7 @@ export const entities = {
     ],
   },
   account_events: {
-    label: 'Історія акаунтів', group: 'Службові', icon: '🕓', defaultSort: 'created_at DESC',
+    label: 'Історія акаунтів', group: 'Службові', icon: 'clock', defaultSort: 'created_at DESC',
     fields: [
       { name: 'account_id', label: 'Акаунт', type: 'ref', ref: 'accounts', list: true },
       { name: 'from_status', label: 'Було', type: 'text', list: true },
@@ -613,7 +644,7 @@ export const entities = {
     ],
   },
   notifications: {
-    label: 'Сповіщення', group: 'Службові', icon: '🔔', defaultSort: 'created_at DESC',
+    label: 'Сповіщення', group: 'Службові', icon: 'bell', defaultSort: 'created_at DESC',
     fields: [
       { name: 'kind', label: 'Тип', type: 'text', list: true },
       { name: 'text', label: 'Текст', type: 'textarea', list: true },
@@ -625,7 +656,7 @@ export const entities = {
     ],
   },
   audit_log: {
-    label: 'Аудит-лог', group: 'Службові', icon: '🛡', readOnlyEntity: true, defaultSort: 'created_at DESC',
+    label: 'Аудит-лог', group: 'Службові', icon: 'shieldCheck', readOnlyEntity: true, defaultSort: 'created_at DESC',
     fields: [
       { name: 'created_at', label: 'Коли', type: 'datetime', list: true },
       { name: 'user_id', label: 'Хто', type: 'ref', ref: 'users', list: true },

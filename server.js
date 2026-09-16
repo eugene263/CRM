@@ -16,6 +16,7 @@ import { seedRoles, syncNewEntities, syncNewRoles } from './src/rbac.js';
 import { expireOverdue } from './src/vault.js';
 import { seedProspecting, prospectingChecks } from './src/prospecting.js';
 import { seedKpi, kpiChecks } from './src/kpi.js';
+import { seedCosting } from './src/costing.js';
 import { backupDatabase } from './src/backup.js';
 import { captureError, installGlobalHandlers } from './src/errors.js';
 
@@ -90,6 +91,7 @@ await syncNewRoles();
 await syncNewEntities();
 await seedProspecting();
 await seedKpi();
+await seedCosting();
 await bootstrapOwner();
 
 if (ROLE !== 'postback') {

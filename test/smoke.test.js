@@ -684,3 +684,71 @@ test('бонус за норму не виплачується при перев
   assert.ok(row.kpi_bonus, 'бонус за нормою рахується окремим блоком');
   assert.equal(row.total, row.fix_amount + row.percent_amount + row.bonus_amount);
 });
+
+// ── Собівартість ─────────────────────────────────────────────────────────
+
+test('собівартість рахується зі ставок і накладних', async () => {
+  const list = await call('/api/costing/services');
+  assert.equal(list.status, 200);
+  assert.ok(list.data.rows.length >= 3, 'демо-послуги на місці');
+
+  const row = list.data.rows[0];
+  const sumOfLines = row.lines.reduce((s, l) => s + l.total, 0);
+  assert.equal(Math.round(sumOfLines * 100) / 100, row.direct, 'прямі = сума рядків');
+  assert.equal(row.overhead, Math.round(row.direct * (row.overhead_percent / 100) * 100) / 100);
+  assert.equal(row.cost, Math.round((row.direct + row.overhead) * 100) / 100);
+});
+
+test('рекомендована ціна виводить на цільову маржу', async () => {
+  const { rows } = (await call('/api/costing/services')).data;
+  const row = rows[0];
+  const margin = Number(row.service.target_margin);
+  assert.equal(row.recommended_price, Math.round((row.cost / (1 - margin / 100)) * 100) / 100);
+
+  const applied = await call(`/api/costing/services/${row.service.id}/apply-price`, { method: 'POST', body: {} });
+  assert.equal(applied.status, 200);
+  assert.ok(Math.abs(applied.data.margin_percent - margin) < 0.5, 'після підстановки маржа дорівнює цільовій');
+});
+
+test('зміна ставки перераховує всі послуги, де вона використана', async () => {
+  const before = (await call('/api/costing/services')).data.rows;
+  const rate = (await call('/api/cost_rates?code=editor_hour')).data.rows[0];
+  await call(`/api/cost_rates/${rate.id}`, { method: 'PUT', body: { amount: Number(rate.amount) + 10 } });
+
+  const after = (await call('/api/costing/services')).data.rows;
+  const affected = after.filter((r) => r.lines.some((l) => l.rate_code === 'editor_hour'));
+  assert.ok(affected.length >= 2, 'ставка використана в кількох послугах');
+  for (const row of affected) {
+    const old = before.find((b) => b.service.id === row.service.id);
+    assert.ok(row.cost > old.cost, `${row.service.name}: собівартість зросла`);
+  }
+  await call(`/api/cost_rates/${rate.id}`, { method: 'PUT', body: { amount: rate.amount } });
+});
+
+test('рядок собівартості додається і видаляється', async () => {
+  const { rows } = (await call('/api/costing/services')).data;
+  const id = rows[0].service.id;
+  const added = await call(`/api/costing/services/${id}/items`, {
+    method: 'POST', body: { name: 'Оренда студії', kind: 'resource', quantity: 2, unit_cost: 25 },
+  });
+  assert.equal(added.status, 200);
+  const line = added.data.lines.find((l) => l.name === 'Оренда студії');
+  assert.equal(line.total, 50);
+
+  const removed = await call(`/api/costing/services/${id}/items/${line.id}`, { method: 'DELETE' });
+  assert.ok(!removed.data.lines.some((l) => l.name === 'Оренда студії'));
+});
+
+test('точка беззбитковості рахується від постійних витрат', async () => {
+  const { summary } = (await call('/api/costing/services')).data;
+  assert.ok('fixed' in summary && 'breakeven_units' in summary);
+  if (summary.breakeven_units != null) assert.ok(summary.breakeven_units > 0);
+});
+
+test('крієйтор не бачить собівартості, фінансист бачить', async () => {
+  // Сесію фінансиста раніше завершили примусово — заходимо заново.
+  await login('finance', 'finance@gennect.local', 'demo1234');
+  assert.equal((await call('/api/costing/services', { as: 'creator' })).status, 403);
+  assert.equal((await call('/api/services', { as: 'creator' })).status, 403);
+  assert.equal((await call('/api/costing/services', { as: 'finance' })).status, 200);
+});

@@ -9,6 +9,7 @@ import {
 import * as vault from './vault.js';
 import * as prospecting from './prospecting.js';
 import * as kpi from './kpi.js';
+import * as costing from './costing.js';
 import { encrypt, decrypt, token, hashIp } from './crypto.js';
 import { hashPassword } from './crypto.js';
 import * as auth from './auth.js';
@@ -362,6 +363,32 @@ export async function handleApi(req, res, url) {
     const body = await readBody(req);
     const result = await importConversions(String(body.csv || ''), user, ip);
     return ok(res, result);
+  }
+
+  // --- собівартість ---
+  if (seg[0] === 'costing') {
+    if (!can(user, 'services', 'read')) return fail(res, 403, 'Немає доступу до собівартості');
+    const canEdit = can(user, 'services', 'update');
+
+    if (seg[1] === 'services' && !seg[2]) return ok(res, await costing.listServices(query));
+    if (seg[1] === 'suggest') {
+      return ok(res, { rates: await costing.suggestedRates(), fixed: await costing.fixedMonthlyCosts() });
+    }
+    if (seg[1] === 'services' && seg[2]) {
+      const serviceId = Number(seg[2]);
+      if (req.method === 'GET' && !seg[3]) return ok(res, await costing.serviceCost(serviceId));
+      if (!canEdit) return fail(res, 403, 'Немає прав редагувати собівартість');
+      if (seg[3] === 'items' && req.method === 'POST') {
+        return ok(res, await costing.saveItem(serviceId, await readBody(req)));
+      }
+      if (seg[3] === 'items' && seg[4] && req.method === 'DELETE') {
+        return ok(res, await costing.deleteItem(serviceId, Number(seg[4])));
+      }
+      if (seg[3] === 'apply-price' && req.method === 'POST') {
+        return ok(res, await costing.applyRecommendedPrice(serviceId));
+      }
+    }
+    return fail(res, 404, 'Немає такого ендпоїнта');
   }
 
   // --- плани та норми ---

@@ -1,6 +1,7 @@
 // Оболонка: логін, меню з /api/meta, хеш-роутер.
 import { api } from './api.js';
 import { el, toast, today, daysAgo } from './ui.js';
+import { icon, withIcon } from './icons.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderEntity } from './pages/entity.js';
 import { renderAnalytics } from './pages/analytics.js';
@@ -44,9 +45,26 @@ $('#login-form').addEventListener('submit', async (e) => {
   }
 });
 
+$('#logout').append(withIcon('logout', 'Вийти'));
 $('#logout').addEventListener('click', async () => {
   await api.post('/auth/logout');
   location.reload();
+});
+
+// Перемикач теми: вибір запамʼятовується, поки користувач його не змінить.
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem('crm_theme', theme); } catch {}
+  const btn = $('#theme-toggle');
+  btn.textContent = '';
+  btn.append(icon(theme === 'light' ? 'moon' : 'sun', 15));
+  btn.title = theme === 'light' ? 'Темна тема' : 'Світла тема';
+  // Графіки читають кольори з CSS, тож після зміни теми їх треба перемалювати.
+  if (state.user) route();
+}
+
+$('#theme-toggle').addEventListener('click', () => {
+  applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
 });
 
 for (const id of ['#date-from', '#date-to']) {
@@ -66,6 +84,7 @@ async function start() {
   $('#who').textContent = `${state.user.name} · ${roleLabel(state.user.role)}`;
   $('#date-from').value = state.range.from;
   $('#date-to').value = state.range.to;
+  applyTheme(document.documentElement.dataset.theme || 'dark');
   buildNav();
   window.addEventListener('hashchange', route);
   route();
@@ -81,23 +100,23 @@ function buildNav() {
   const nav = $('#nav');
   nav.textContent = '';
   const links = [
-    { href: '#/dashboard', icon: '📊', label: 'Дашборд', group: 'Огляд' },
-    { href: '#/analytics', icon: '🔍', label: 'Аналітика', group: 'Огляд' },
-    { href: '#/finance', icon: '💵', label: 'Фінанси', group: 'Огляд' },
-    ...(state.meta.leads ? [{ href: '#/prospecting', icon: '🎯', label: 'Пошук клієнтів', group: 'Огляд' }] : []),
-    ...(state.meta.kpi_plans ? [{ href: '#/plans', icon: '🎚', label: 'Плани та норми', group: 'Огляд' }] : []),
-    ...(state.meta.users ? [{ href: '#/roles', icon: '🛡', label: 'Ролі та права', group: 'Огляд' }] : []),
+    { href: '#/dashboard', icon: 'dashboard', label: 'Дашборд', group: 'Огляд' },
+    { href: '#/analytics', icon: 'analytics', label: 'Аналітика', group: 'Огляд' },
+    { href: '#/finance', icon: 'finance', label: 'Фінанси', group: 'Огляд' },
+    ...(state.meta.leads ? [{ href: '#/prospecting', icon: 'target', label: 'Пошук клієнтів', group: 'Огляд' }] : []),
+    ...(state.meta.kpi_plans ? [{ href: '#/plans', icon: 'gauge', label: 'Плани та норми', group: 'Огляд' }] : []),
+    ...(state.meta.users ? [{ href: '#/roles', icon: 'shield', label: 'Ролі та права', group: 'Огляд' }] : []),
   ];
   for (const ent of Object.values(state.meta)) {
-    links.push({ href: `#/e/${ent.key}`, icon: ent.icon || '•', label: ent.label, group: ent.group });
+    links.push({ href: `#/e/${ent.key}`, icon: ent.icon || ent.key, label: ent.label, group: ent.group });
   }
-  links.push({ href: '#/profile', icon: '⚙️', label: 'Профіль і 2FA', group: 'Огляд' });
+  links.push({ href: '#/profile', icon: 'settings', label: 'Профіль і 2FA', group: 'Огляд' });
 
   const groups = [...new Set(links.map((l) => l.group))];
   for (const g of groups) {
     const box = el('div', { class: 'nav-group' }, el('h4', {}, g));
     for (const l of links.filter((x) => x.group === g)) {
-      box.append(el('a', { href: l.href, 'data-href': l.href }, `${l.icon}  ${l.label}`));
+      box.append(el('a', { href: l.href, 'data-href': l.href }, icon(l.icon, 16), l.label));
     }
     nav.append(box);
   }

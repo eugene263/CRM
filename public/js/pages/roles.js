@@ -3,6 +3,7 @@
 import { api } from '../api.js';
 import { state } from '../app.js';
 import { el, toast, modal } from '../ui.js';
+import { icon, withIcon } from '../icons.js';
 
 const LEVELS = [['none', '—'], ['read', 'Читання'], ['write', 'Запис'], ['full', 'Повний']];
 const SCOPES = [['own', 'Свої'], ['team', 'Команда'], ['all', 'Усі']];
@@ -27,7 +28,7 @@ export async function renderRoles() {
       tabs.append(el('button', {
         class: `btn small${r.key === current ? ' active' : ''}`,
         onclick: () => { current = r.key; renderRole(); },
-      }, `${r.label}${r.is_system ? '' : ' ✎'}`));
+      }, r.is_system ? r.label : withIcon('edit', r.label, 13)));
     }
     if (editable) {
       tabs.append(el('button', {
@@ -48,7 +49,7 @@ export async function renderRoles() {
             },
           }, 'Створити')]);
         },
-      }, '+ Роль'));
+      }, withIcon('plus', 'Роль')));
     }
 
     const role = data.roles.find((r) => r.key === current);

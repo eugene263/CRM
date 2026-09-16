@@ -769,3 +769,47 @@ CREATE TABLE IF NOT EXISTS channel_limits (
   is_active INTEGER NOT NULL DEFAULT 1
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_channel_account ON channel_limits(account_name, channel);
+
+-- ── Собівартість послуг ───────────────────────────────────────────────────
+-- Ставки (година роботи, акаунт, проксі, підписка) окремо від послуг:
+-- змінив ставку — перерахувались усі послуги, які її використовують.
+CREATE TABLE IF NOT EXISTS cost_rates (
+  id INTEGER PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'labor',      -- labor|resource|subscription|overhead
+  unit TEXT NOT NULL DEFAULT 'год',        -- год|шт|міс|%
+  amount REAL NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  note TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS services (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  category TEXT,
+  unit TEXT NOT NULL DEFAULT 'шт',         -- ролик|пакет|місяць|шт
+  description TEXT,
+  target_margin REAL NOT NULL DEFAULT 50,  -- цільова маржа, %
+  price REAL NOT NULL DEFAULT 0,           -- фактична ціна продажу
+  currency TEXT NOT NULL DEFAULT 'USD',
+  volume_per_month REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',   -- active|draft|archived
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS service_cost_items (
+  id INTEGER PRIMARY KEY,
+  service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+  rate_code TEXT,                          -- звʼязок зі ставкою або власна ціна
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'labor',
+  quantity REAL NOT NULL DEFAULT 1,
+  unit_cost REAL,                          -- NULL → береться з cost_rates
+  note TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_cost_items ON service_cost_items(service_id);

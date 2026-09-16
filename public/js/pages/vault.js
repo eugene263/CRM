@@ -2,6 +2,7 @@
 import { api } from '../api.js';
 import { state } from '../app.js';
 import { el, modal, toast } from '../ui.js';
+import { icon } from '../icons.js';
 
 const SECRETS = [
   ['password_enc', 'Пароль'], ['recovery_enc', 'Recovery'], ['totp_seed_enc', '2FA seed'], ['notes_enc', 'Нотатки'],
@@ -56,7 +57,7 @@ export function credentialActions(row, reload) {
       }, 'Код 2FA'));
       modal(`Доступ «${row.title}»`, menu);
     },
-  }, '🔓'));
+  }, icon('key', 15)));
 
   const canManage = state.meta.credentials?.can.update;
   if (canManage && row.status !== 'issued') {
@@ -84,7 +85,7 @@ export function credentialActions(row, reload) {
           },
         }, 'Видати')]);
       },
-    }, '🪪'));
+    }, icon('idCard', 15)));
   }
 
   if (canManage && row.status === 'issued') {
@@ -97,7 +98,7 @@ export function credentialActions(row, reload) {
           toast('Повернено. Пароль позначено на ротацію'); reload();
         } catch (e) { toast(e.message, true); }
       },
-    }, '↩️'));
+    }, icon('undo', 15)));
     wrap.append(el('button', {
       class: 'btn small danger', style: 'margin-left:6px', title: 'Відкликати',
       onclick: async () => {
@@ -105,7 +106,7 @@ export function credentialActions(row, reload) {
         await api.post(`/credentials/${row.id}/revoke`, { reason: 'ручне відкликання' });
         toast('Відкликано'); reload();
       },
-    }, '⛔️'));
+    }, icon('ban', 15)));
   }
 
   return wrap;

@@ -4,6 +4,7 @@ import { state, reloadRefs } from '../app.js';
 import { el, money, num, badge, modal, toast } from '../ui.js';
 import { credentialActions } from './vault.js';
 import { openLead } from './prospecting.js';
+import { icon, withIcon } from '../icons.js';
 
 const PAGE = 50;
 
@@ -133,32 +134,32 @@ export async function renderEntity(entKey) {
       el('tbody', {}, ...data.rows.map((row) => el('tr', {},
         ...cols.map((f) => el('td', { class: ['money', 'number'].includes(f.type) ? 'num' : '' }, cellValue(f, row))),
         el('td', {},
-          ent.can.update && !ent.readOnlyEntity ? el('button', { class: 'btn small', onclick: () => openForm(entKey, row, load) }, '✎') : null,
+          ent.can.update && !ent.readOnlyEntity ? el('button', { class: 'btn small icon-only', title: 'Редагувати', onclick: () => openForm(entKey, row, load) }, icon('edit', 15)) : null,
           entKey === 'access_requests' && row.status === 'pending' && (state.caps.settings || state.user.role === 'teamlead') ? el('span', {},
             el('button', {
               class: 'btn small', title: 'Схвалити',
               onclick: async () => { await api.post(`/access_requests/${row.id}/decide`, { approve: true }); toast('Схвалено'); load(); },
-            }, '✅'),
+            }, icon('check', 15)),
             el('button', {
               class: 'btn small danger', style: 'margin-left:6px', title: 'Відхилити',
               onclick: async () => { await api.post(`/access_requests/${row.id}/decide`, { approve: false }); toast('Відхилено'); load(); },
-            }, '⛔️')) : null,
+            }, icon('ban', 15))) : null,
           ent.can.delete ? el('button', {
-            class: 'btn small danger', style: 'margin-left:6px',
+            class: 'btn small danger icon-only', style: 'margin-left:6px', title: 'Видалити',
             onclick: async () => {
               if (!confirm(`Видалити запис #${row.id}?`)) return;
               await api.del(`/${entKey}/${row.id}`);
               toast('Видалено');
               load();
             },
-          }, '✕') : null,
+          }, icon('trash', 15)) : null,
           entKey === 'credentials' ? credentialActions(row, load) : null,
           entKey === 'leads' ? el('button', {
-            class: 'btn small', style: 'margin-left:6px', title: 'Картка ліда',
+            class: 'btn small icon-only', style: 'margin-left:6px', title: 'Картка ліда',
             onclick: () => openLead(row.id, load),
-          }, '🗂') : null,
+          }, icon('folder', 15)) : null,
           entKey === 'users' && state.caps.settings && row.status === 'active' ? el('button', {
-            class: 'btn small danger', style: 'margin-left:6px', title: 'Офбординг',
+            class: 'btn small danger icon-only', style: 'margin-left:6px', title: 'Офбординг',
             onclick: async () => {
               if (!confirm(`Офбординг ${row.name}?\n\nСесії буде вбито, доступи відкликано й позначено на ротацію, акаунт вимкнено.`)) return;
               try {
@@ -167,9 +168,9 @@ export async function renderEntity(entKey) {
                 load();
               } catch (e) { toast(e.message, true); }
             },
-          }, '👋') : null,
+          }, icon('logout', 15)) : null,
           entKey === 'accounts' ? el('button', {
-            class: 'btn small', style: 'margin-left:6px',
+            class: 'btn small icon-only', style: 'margin-left:6px', title: 'Історія',
             onclick: async () => {
               const h = await api.get(`/accounts/${row.id}/history`);
               modal(`Історія акаунта #${row.id}`, el('div', { class: 'table-wrap' }, el('table', {},
@@ -177,14 +178,14 @@ export async function renderEntity(entKey) {
                 el('tbody', {}, ...h.rows.map((e2) => el('tr', {},
                   el('td', {}, String(e2.created_at).slice(0, 16)), el('td', {}, e2.from_status || '—'), el('td', {}, e2.to_status)))))));
             },
-          }, '🕓') : null)))));
+          }, icon('history', 15)) : null)))));
     tableWrap.textContent = '';
     tableWrap.append(data.rows.length ? table : el('div', { class: 'muted' }, 'Записів немає'));
     pager.textContent = '';
     pager.append(
-      el('button', { class: 'btn small', onclick: () => { filters.offset = Math.max(0, filters.offset - PAGE); load(); } }, '‹'),
+      el('button', { class: 'btn small icon-only', onclick: () => { filters.offset = Math.max(0, filters.offset - PAGE); load(); } }, icon('chevronLeft', 14)),
       `${data.offset + 1}–${Math.min(data.offset + PAGE, data.total)} з ${data.total}`,
-      el('button', { class: 'btn small', onclick: () => { if (filters.offset + PAGE < data.total) { filters.offset += PAGE; load(); } } }, '›'));
+      el('button', { class: 'btn small icon-only', onclick: () => { if (filters.offset + PAGE < data.total) { filters.offset += PAGE; load(); } } }, icon('chevronRight', 14)));
   }
 
   const toolbar = el('div', { class: 'row', style: 'margin-bottom:14px' },
@@ -194,8 +195,8 @@ export async function renderEntity(entKey) {
       state.caps.export ? el('button', {
         class: 'btn',
         onclick: () => { window.location.href = `/api/${entKey}/export?limit=500`; toast('Експорт записано в аудит-лог'); },
-      }, 'Експорт CSV') : null,
-      ent.can.create ? el('button', { class: 'btn primary', onclick: () => openForm(entKey, null, load) }, '+ Додати') : null));
+      }, withIcon('download', 'Експорт CSV')) : null,
+      ent.can.create ? el('button', { class: 'btn primary', onclick: () => openForm(entKey, null, load) }, withIcon('plus', 'Додати')) : null));
 
   search.addEventListener('keydown', (e) => { if (e.key === 'Enter') { filters.offset = 0; load(); } });
   box.append(toolbar, el('div', { class: 'card' }, tableWrap, pager));

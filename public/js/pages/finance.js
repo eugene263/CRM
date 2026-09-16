@@ -2,6 +2,8 @@
 import { api } from '../api.js';
 import { state } from '../app.js';
 import { el, money, num, pct, toast } from '../ui.js';
+import { icon, withIcon } from '../icons.js';
+import { renderCosting } from './costing.js';
 
 const monthNow = () => new Date().toISOString().slice(0, 7);
 
@@ -16,6 +18,30 @@ function categoryLabel(value) {
 }
 
 export async function renderFinance() {
+  const wrap = el('div', {});
+  const tabs = el('div', { class: 'tabs' });
+  const body = el('div', {});
+  let tab = 'overview';
+
+  async function switchTab() {
+    tabs.textContent = '';
+    for (const [key, label, iconName] of [['overview', 'Огляд', 'finance'], ['costing', 'Собівартість', 'calculator']]) {
+      if (key === 'costing' && !state.meta.services) continue;
+      tabs.append(el('button', {
+        class: `btn small${tab === key ? ' active' : ''}`,
+        onclick: () => { tab = key; switchTab(); },
+      }, withIcon(iconName, label, 14)));
+    }
+    body.textContent = '';
+    body.append(tab === 'costing' ? await renderCosting() : await renderOverview());
+  }
+
+  wrap.append(tabs, body);
+  await switchTab();
+  return wrap;
+}
+
+async function renderOverview() {
   const box = el('div', {});
   const period = el('input', { type: 'month', value: monthNow(), style: 'max-width:180px' });
 

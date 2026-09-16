@@ -24,7 +24,8 @@ const PROSPECTING_SELF = {
   ramp_up_plans: R('read', 'own'), bonus_rules: R('read', 'own'), quality_flags: R('read', 'own'),
 };
 const CONTENT = ['creatives', 'creative_versions', 'tasks'];
-const MONEY = ['expenses', 'payouts', 'salary_rules', 'partners', 'offers', 'offer_rates_history'];
+const MONEY = ['expenses', 'payouts', 'salary_rules', 'partners', 'offers', 'offer_rates_history',
+  'services', 'cost_rates'];
 
 function spread(keys, rule) {
   return Object.fromEntries(keys.map((k) => [k, rule]));
@@ -54,6 +55,7 @@ export const defaultMatrix = {
     offer_rates_history: R('read', 'all'),
     expenses: R('write', 'team'),
     payouts: R('read', 'team'),
+    services: R('read', 'all'), cost_rates: R('read', 'all'),
     kpi_targets: R('write', 'team'),
     users: R('read', 'team'),
     teams: R('read', 'team'),

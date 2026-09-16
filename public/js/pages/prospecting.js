@@ -3,6 +3,7 @@
 import { api } from '../api.js';
 import { state } from '../app.js';
 import { el, modal, toast, num, pct } from '../ui.js';
+import { icon, withIcon } from '../icons.js';
 
 let dicts = null;
 const dictOf = (kind) => (dicts?.dictionaries || []).filter((d) => d.kind === kind);
@@ -23,7 +24,7 @@ export async function openLead(leadId, onChange = () => {}) {
     el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' },
       el('b', { style: 'font-size:16px' }, lead.company_name),
       el('span', { class: 'badge' }, statusName(lead.status_code)),
-      el('span', { class: 'badge' }, { hot: '🔥 Гарячий', warm: 'Теплий', cold: 'Холодний' }[lead.priority] || lead.priority),
+      el('span', { class: 'badge' }, { hot: 'Гарячий', warm: 'Теплий', cold: 'Холодний' }[lead.priority] || lead.priority),
       lead.score ? el('span', { class: 'muted' }, `скоринг ${lead.score}`) : null),
     el('div', { class: 'muted', style: 'margin-top:4px;font-size:12.5px' },
       [lead.geo_city, lead.geo_country, lead.vertical].filter(Boolean).join(' · ') || '—',
@@ -46,7 +47,8 @@ export async function openLead(leadId, onChange = () => {}) {
   const timeline = el('div', { class: 'card' }, el('h3', {}, `Таймлайн · ${touches.length} тачів`),
     touches.length ? el('div', {}, ...touches.map((t) => el('div', { class: 'alert-item', style: 'align-items:flex-start' },
       el('div', {},
-        el('div', {}, `${t.direction === 'in' ? '⬅️ Відповідь' : `➡️ Тач #${t.touch_number}`} · ${t.channel}${t.from_account ? ` · з ${t.from_account}` : ''}`),
+        el('div', { class: 'with-icon' }, icon(t.direction === 'in' ? 'undo' : 'send', 14),
+          `${t.direction === 'in' ? 'Відповідь' : `Тач #${t.touch_number}`} · ${t.channel}${t.from_account ? ` · з ${t.from_account}` : ''}`),
         t.message_text ? el('div', { class: 'muted', style: 'font-size:12px;max-width:380px' }, t.message_text.slice(0, 160)) : null),
       el('span', { class: 'muted' }, String(t.sent_at).slice(0, 16)))))
       : el('div', { class: 'muted' }, 'Ще не писали'));
@@ -64,8 +66,8 @@ export async function openLead(leadId, onChange = () => {}) {
     })());
 
   const actions = el('div', { class: 'row', style: 'margin-top:12px' },
-    el('button', { class: 'btn primary', style: 'flex:0 0 auto', onclick: () => { box.remove(); touchForm(lead, contacts, onChange); } }, '✉️ Записати тач'),
-    el('button', { class: 'btn', style: 'flex:0 0 auto', onclick: () => { box.remove(); statusForm(lead, onChange); } }, '🚦 Змінити статус'),
+    el('button', { class: 'btn primary', style: 'flex:0 0 auto', onclick: () => { box.remove(); touchForm(lead, contacts, onChange); } }, withIcon('send', 'Записати тач')),
+    el('button', { class: 'btn', style: 'flex:0 0 auto', onclick: () => { box.remove(); statusForm(lead, onChange); } }, withIcon('flag', 'Змінити статус')),
     tasks.filter((t) => t.status === 'open').length
       ? el('span', { class: 'muted' }, `відкритих задач: ${tasks.filter((t) => t.status === 'open').length}`) : null);
 
@@ -272,7 +274,7 @@ export async function renderProspecting() {
   const leadRow = (lead, extra) => el('tr', {},
     el('td', {}, el('a', { href: '#', onclick: (e) => { e.preventDefault(); openLead(lead.id, render); } }, lead.company_name)),
     el('td', {}, statusName(lead.status_code)),
-    el('td', {}, { hot: '🔥', warm: '·', cold: '❄️' }[lead.priority] || ''),
+    el('td', {}, lead.priority === 'hot' ? icon('alert', 14) : lead.priority === 'cold' ? icon('minus', 14) : ''),
     el('td', { class: 'num' }, num(lead.touches_count)),
     el('td', {}, String(lead.next_contact_at || '—').slice(0, 16)),
     el('td', { class: 'muted' }, extra || lead.geo_city || ''));
@@ -315,9 +317,9 @@ export async function renderProspecting() {
           el('div', { class: 'value pos' }, num(q.replies.length))),
         el('div', { class: 'tile' }, el('div', { class: 'label' }, 'Ще не писали'),
           el('div', { class: 'value' }, num(q.fresh.length)))),
-      el('div', { class: 'card' }, el('h3', {}, '💬 Відповіли — реагувати першими'), table(q.replies, 'Немає нових відповідей', (r) => r.channel)),
-      el('div', { class: 'card' }, el('h3', {}, '⏰ Час писати'), table(q.overdue, 'Черга порожня')),
-      el('div', { class: 'card' }, el('h3', {}, '🆕 Ще не торкались'), table(q.fresh, 'Усі ліди вже в роботі')));
+      el('div', { class: 'card' }, el('h3', {}, icon('mail'), 'Відповіли — реагувати першими'), table(q.replies, 'Немає нових відповідей', (r) => r.channel)),
+      el('div', { class: 'card' }, el('h3', {}, icon('clock'), 'Час писати'), table(q.overdue, 'Черга порожня')),
+      el('div', { class: 'card' }, el('h3', {}, icon('target'), 'Ще не торкались'), table(q.fresh, 'Усі ліди вже в роботі')));
   }
 
   async function renderFunnel() {
@@ -404,8 +406,8 @@ export async function renderProspecting() {
     }
     tabs.append(
       el('span', { style: 'flex:1' }),
-      el('button', { class: 'btn small', onclick: () => bulkForm(render) }, '📋 Пачкою'),
-      el('button', { class: 'btn small primary', onclick: () => addForm(render) }, '+ Лід'));
+      el('button', { class: 'btn small', onclick: () => bulkForm(render) }, withIcon('layers', 'Пачкою')),
+      el('button', { class: 'btn small primary', onclick: () => addForm(render) }, withIcon('plus', 'Лід')));
     if (tab === 'queue') await renderQueue();
     else if (tab === 'funnel') await renderFunnel();
     else await renderDuplicates();

@@ -21,6 +21,13 @@ export const pct = (v) => (v === null || v === undefined ? '—' : `${Number(v).
 export const today = () => new Date().toISOString().slice(0, 10);
 export const daysAgo = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
 
+// Палітра графіків береться з CSS — тоді зміна теми міняє й лінії.
+// Обидва набори перевірені валідатором на контраст і розрізнення при CVD.
+export function chartColor(slot) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(`--chart-${slot}`).trim();
+  return value || '#5b7bf5';
+}
+
 export function toast(message, isError = false) {
   const t = el('div', { class: `toast${isError ? ' err' : ''}` }, message);
   document.body.append(t);
@@ -81,6 +88,6 @@ export function barList(rows, { labelKey = 'label', valueKey = 'revenue', format
   return el('div', {}, ...rows.map((r) => el('div', { style: 'margin-bottom:8px' },
     el('div', { style: 'display:flex;justify-content:space-between;font-size:13px' },
       el('span', {}, r[labelKey] ?? '—'), el('span', { class: 'muted' }, format(r[valueKey]))),
-    el('div', { style: 'height:6px;background:var(--panel-2);border-radius:4px;overflow:hidden;margin-top:3px' },
-      el('div', { style: `height:100%;width:${((Number(r[valueKey]) || 0) / max) * 100}%;background:var(--accent)` })))));
+    el('div', { class: 'bar-track' },
+      el('div', { class: 'bar-fill', style: `width:${((Number(r[valueKey]) || 0) / max) * 100}%` })))));
 }

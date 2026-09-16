@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { state } from '../app.js';
-import { el, money, num, pct, lineChart, barList, badge } from '../ui.js';
+import { el, money, num, pct, lineChart, barList, badge, chartColor } from '../ui.js';
+import { icon, withIcon } from '../icons.js';
 
 export async function renderDashboard() {
   const { from, to } = state.range;
@@ -29,15 +30,15 @@ export async function renderDashboard() {
   if (s.revenue !== null || s.expenses !== null) {
     box.append(el('div', { class: 'card' }, el('h3', {}, 'Дохід і витрати'),
       lineChart(data.timeline, [
-        { key: 'revenue', label: 'Дохід, $', color: '#38d39f' },
-        { key: 'expenses', label: 'Витрати, $', color: '#ff6b6b' },
+        { key: 'revenue', label: 'Дохід, $', color: chartColor(1) },
+        { key: 'expenses', label: 'Витрати, $', color: chartColor(2) },
       ])));
   }
   box.append(el('div', { class: 'card' }, el('h3', {}, 'Заливи, депи, бани'),
     lineChart(data.timeline, [
-      { key: 'posts', label: 'Публікації', color: '#6c8cff' },
-      { key: 'deps', label: 'Депи', color: '#38d39f' },
-      { key: 'bans', label: 'Бани', color: '#ff6b6b' },
+      { key: 'posts', label: 'Публікації', color: chartColor(3) },
+      { key: 'deps', label: 'Депи', color: chartColor(1) },
+      { key: 'bans', label: 'Бани', color: chartColor(2) },
     ])));
 
   const cols = el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px' });
@@ -51,14 +52,14 @@ export async function renderDashboard() {
   box.append(cols);
 
   const a = data.alerts;
-  const alerts = el('div', { class: 'card' }, el('h3', {}, 'Що горить'));
+  const alerts = el('div', { class: 'card' }, el('h3', {}, icon('alert'), 'Що горить'));
   const items = [
-    ...a.bans24.map((b) => `🚫 Бан: ${b.platform} @${b.nickname} (${String(b.created_at).slice(5, 16)})`),
-    ...a.proxyExpiring.map((p) => `⌛ Проксі #${p.id} ${p.provider || ''} ${p.geo || ''} — оплачено до ${p.paid_until}`),
-    ...a.planToday.map((p) => `📉 ${p.name}: план ${p.target}, факт ${p.fact}`),
+    ...a.bans24.map((b) => ['ban', `Бан: ${b.platform} @${b.nickname} (${String(b.created_at).slice(5, 16)})`]),
+    ...a.proxyExpiring.map((p) => ['clock', `Проксі #${p.id} ${p.provider || ''} ${p.geo || ''} — оплачено до ${p.paid_until}`]),
+    ...a.planToday.map((p) => ['gauge', `${p.name}: план ${p.target}, факт ${p.fact}`]),
   ];
   if (!items.length) alerts.append(el('div', { class: 'muted' }, 'Чисто: банів за добу немає, проксі оплачені, плани виконуються.'));
-  for (const text of items) alerts.append(el('div', { class: 'alert-item' }, text));
+  for (const [name, text] of items) alerts.append(el('div', { class: 'alert-item' }, withIcon(name, text)));
   box.append(alerts);
 
   box.append(el('div', { class: 'muted', style: 'font-size:12px' },

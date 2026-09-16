@@ -2,6 +2,7 @@
 import { api } from '../api.js';
 import { state } from '../app.js';
 import { el, money, num, pct, toast } from '../ui.js';
+import { icon, withIcon } from '../icons.js';
 
 const DIMS = [
   ['offer', 'Офер'], ['user', 'Крієйтор'], ['account', 'Акаунт'],
@@ -60,7 +61,7 @@ export async function renderAnalytics() {
         el('td', { class: 'num' }, pct(r.cr_prev)),
         el('td', { class: 'num' }, pct(r.cr_recent)),
         el('td', { class: 'num' }, r.drop_pct == null ? '—' : pct(r.drop_pct)),
-        el('td', {}, r.burning ? '🔥 вигорає' : '—'))))))
+        el('td', {}, r.burning ? withIcon('alert', 'вигорає') : '—'))))))
       : el('div', { class: 'muted' }, 'Замало даних за 14 днів.'));
 
     const life = await api.get('/analytics/lifetime');
