@@ -47,13 +47,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .login-card h1 { margin: 0 0 4px; font-size: 22px; }
 .login-card p.sub { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
 
-/* Каркас */
-.shell { display: grid; grid-template-columns: 236px 1fr; min-height: 100vh; }
-.sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 16px 12px; overflow-y: auto; }
+/* Каркас — фіксована висота вʼюпорта на .shell, щоб сайдбар і контент
+   скролились кожен своєю смугою, а не разом як один довгий документ. */
+.shell { display: grid; grid-template-columns: 236px 1fr; height: 100vh; }
+.sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 16px 12px; overflow-y: auto; height: 100%; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; padding: 6px 10px 16px; letter-spacing: .02em; }
 .brand span.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
-.nav-group { margin-top: 14px; }
-.nav-group h4 { margin: 0 0 6px; padding: 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.nav-group { margin-top: 6px; }
+.nav-group h4 {
+  display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 10px;
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  cursor: pointer; border-radius: 7px; user-select: none;
+}
+.nav-group h4:hover { background: var(--panel-2); color: var(--text); }
+.nav-group h4 .icon { color: var(--muted); transition: transform .15s; flex: 0 0 auto; }
+.nav-group.collapsed h4 .icon { transform: rotate(-90deg); }
+.nav-group .nav-items { display: grid; gap: 1px; overflow: hidden; }
+.nav-group.collapsed .nav-items { display: none; }
 .nav a {
   display: flex; gap: 9px; align-items: center; padding: 7px 10px;
   border-radius: 9px; color: var(--text); font-size: 13.5px;
@@ -62,13 +72,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav a:hover { background: var(--panel-2); }
 .nav a.active { background: var(--accent-soft); color: var(--text); font-weight: 500; }
 .nav a.active .icon { color: var(--accent); }
-.main { display: flex; flex-direction: column; min-width: 0; }
+.main { display: flex; flex-direction: column; min-width: 0; height: 100%; overflow: hidden; }
 .topbar {
   display: flex; gap: 12px; align-items: center; padding: 12px 20px;
-  border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5;
+  border-bottom: 1px solid var(--line); background: var(--panel); flex: 0 0 auto;
 }
 .topbar h2 { margin: 0; font-size: 17px; flex: 1; }
-.content { padding: 20px; }
+.content { padding: 20px; overflow-y: auto; flex: 1 1 auto; }
 
 /* Елементи */
 .btn {
@@ -125,6 +135,15 @@ th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: upp
 tbody tr:hover { background: var(--panel-2); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .table-wrap { overflow-x: auto; }
+/* Клітинки, редаговані кліком (собівартість, ставки): пунктирне підкреслення
+   натякає на редагованість без рамки на кожній клітинці таблиці. */
+td.editable { cursor: text; }
+td.editable .editable-value { border-bottom: 1px dashed transparent; }
+td.editable:hover .editable-value { border-bottom-color: var(--muted); }
+td.editable input {
+  width: 100%; min-width: 70px; padding: 3px 6px; border-radius: 6px;
+  background: var(--panel); border: 1px solid var(--accent);
+}
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; border: 1px solid var(--line); }
 .badge.active, .badge.approved, .badge.paid, .badge.live, .badge.done,
@@ -163,6 +182,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .bar-track { height: 6px; background: var(--panel-2); border-radius: 4px; overflow: hidden; margin-top: 3px; }
 .bar-fill { height: 100%; border-radius: 4px; background: var(--accent); }
 @media (max-width: 880px) {
-  .shell { grid-template-columns: 1fr; }
-  .sidebar { position: sticky; top: 0; z-index: 10; max-height: 46vh; }
+  /* На вузькому екрані повертаємось до звичайного скролу сторінки:
+     двох незалежних смуг на такій висоті немає сенсу тримати. */
+  .shell { grid-template-columns: 1fr; height: auto; }
+  .sidebar { position: sticky; top: 0; z-index: 10; max-height: 46vh; height: auto; }
+  .main { height: auto; overflow: visible; }
+  .content { overflow-y: visible; }
 }

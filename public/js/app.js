@@ -96,6 +96,19 @@ const ROLE_LABELS = {
 };
 export const roleLabel = (r) => ROLE_LABELS[r] || r;
 
+// Які категорії згорнуті — за назвою групи, переживає перезавантаження
+// сторінки. Один спільний список на всі ролі: групи, яких у ролі немає,
+// просто не використовуються.
+function collapsedGroups() {
+  try { return new Set(JSON.parse(localStorage.getItem('crm_nav_collapsed') || '[]')); }
+  catch { return new Set(); }
+}
+function setGroupCollapsed(group, collapsed) {
+  const set = collapsedGroups();
+  if (collapsed) set.add(group); else set.delete(group);
+  try { localStorage.setItem('crm_nav_collapsed', JSON.stringify([...set])); } catch {}
+}
+
 function buildNav() {
   const nav = $('#nav');
   nav.textContent = '';
@@ -112,18 +125,41 @@ function buildNav() {
   }
   links.push({ href: '#/profile', icon: 'settings', label: 'Профіль і 2FA', group: 'Огляд' });
 
+  const collapsed = collapsedGroups();
   const groups = [...new Set(links.map((l) => l.group))];
   for (const g of groups) {
-    const box = el('div', { class: 'nav-group' }, el('h4', {}, g));
+    const items = el('div', { class: 'nav-items' });
     for (const l of links.filter((x) => x.group === g)) {
-      box.append(el('a', { href: l.href, 'data-href': l.href }, icon(l.icon, 16), l.label));
+      items.append(el('a', { href: l.href, 'data-href': l.href }, icon(l.icon, 16), l.label));
     }
+    const box = el('div', { class: `nav-group${collapsed.has(g) ? ' collapsed' : ''}` });
+    box.append(
+      el('h4', {
+        onclick: () => {
+          const isCollapsed = box.classList.toggle('collapsed');
+          setGroupCollapsed(g, isCollapsed);
+        },
+      }, icon('chevronDown', 12), g),
+      items,
+    );
     nav.append(box);
   }
 }
 
 function markActive(hash) {
-  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.href === hash));
+  document.querySelectorAll('#nav a').forEach((a) => {
+    const isActive = a.dataset.href === hash;
+    a.classList.toggle('active', isActive);
+    // Категорія могла бути згорнута ще до переходу на цю сторінку —
+    // не варто ховати пункт, на якому людина зараз стоїть.
+    if (isActive) {
+      const group = a.closest('.nav-group');
+      if (group?.classList.contains('collapsed')) {
+        group.classList.remove('collapsed');
+        setGroupCollapsed(group.querySelector('h4')?.textContent?.trim(), false);
+      }
+    }
+  });
 }
 
 async function route() {

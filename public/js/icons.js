@@ -62,6 +62,7 @@ const P = {
   grid: ['M4 4h7v7H4z', 'M13 4h7v7h-7z', 'M4 13h7v7H4z', 'M13 13h7v7h-7z'],
   chevronLeft: ['M14 6l-6 6 6 6'],
   chevronRight: ['M10 6l6 6-6 6'],
+  chevronDown: ['M6 10l6 6 6-6'],
   history: ['M4 12a8 8 0 1 0 2.5-5.8', 'M4 5v4h4', 'M12 8v4.5l3 1.8'],
   dot: ['M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4'],
 };

@@ -83,6 +83,62 @@ export function lineChart(rows, series, { height = 190 } = {}) {
   return wrap;
 }
 
+// Клітинка «клік → інпут → збереження»: для таблиць, де формою відкривати
+// заради одного числа незручно (собівартість, ставки). Enter/blur зберігає,
+// Escape скасовує; порожній рядок для number-полів не шле запит.
+export function editableCell(value, { type = 'text', format = (v) => v ?? '—', onSave, className = '' } = {}) {
+  const td = el('td', { class: className });
+  let editing = false;
+
+  function renderView() {
+    editing = false;
+    td.textContent = '';
+    td.classList.add('editable');
+    td.append(el('span', { class: 'editable-value' }, format(value)));
+    td.onclick = () => renderEdit();
+  }
+
+  function renderEdit() {
+    if (editing) return;
+    editing = true;
+    td.onclick = null;
+    const input = el('input', {
+      type: type === 'number' ? 'number' : 'text',
+      step: type === 'number' ? 'any' : undefined,
+      value: value ?? '',
+    });
+    td.textContent = '';
+    td.append(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    const commit = async () => {
+      if (done) return;
+      done = true;
+      const raw = input.value;
+      if (raw === String(value ?? '')) { renderView(); return; }
+      const next = type === 'number' ? (raw === '' ? null : Number(raw)) : raw;
+      if (type === 'number' && raw !== '' && Number.isNaN(next)) { renderView(); return; }
+      try {
+        await onSave(next);
+        value = next;
+      } catch (e) {
+        toast(e.message, true);
+      }
+      renderView();
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { done = true; renderView(); }
+    });
+  }
+
+  renderView();
+  return td;
+}
+
 export function barList(rows, { labelKey = 'label', valueKey = 'revenue', format = money } = {}) {
   const max = Math.max(1, ...rows.map((r) => Number(r[valueKey]) || 0));
   return el('div', {}, ...rows.map((r) => el('div', { style: 'margin-bottom:8px' },
