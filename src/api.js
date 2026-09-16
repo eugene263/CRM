@@ -298,8 +298,14 @@ export async function handleApi(req, res, url) {
   // --- метадані для інтерфейсу ---
   if (seg[0] === 'meta') {
     const meta = {};
+    const locked = [];
     for (const [key, ent] of Object.entries(entities)) {
-      if (!can(user, key, 'read')) continue;
+      if (!can(user, key, 'read')) {
+        // Пункт лишається видимим у меню із замочком — так людина розуміє,
+        // що розділ існує, а не губиться, і знає, що просити в адміна.
+        locked.push({ key, label: ent.label, group: ent.group, icon: ent.icon });
+        continue;
+      }
       meta[key] = {
         key, label: ent.label, group: ent.group, icon: ent.icon, title: ent.title,
         fields: visibleFields(user, key),
@@ -309,7 +315,7 @@ export async function handleApi(req, res, url) {
         scope: scopeOf(user, key),
       };
     }
-    return ok(res, { entities: meta, refs: await refOptions(user), user: auth.publicUser(user), caps: capsOf(user) });
+    return ok(res, { entities: meta, locked, refs: await refOptions(user), user: auth.publicUser(user), caps: capsOf(user) });
   }
 
   if (seg[0] === 'refs') return ok(res, await refOptions(user));

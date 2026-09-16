@@ -1021,3 +1021,13 @@ test('перезапуск сам дозаповнює права ролі, як
     server2.kill();
   }
 });
+
+test('/api/meta повертає недоступні розділи окремим списком, без полів', async () => {
+  const meta = await call('/api/meta', { as: 'creator' });
+  assert.equal(meta.status, 200);
+  assert.ok(!meta.data.entities.clients, 'крієйтор не має доступу до клієнтів — у entities його нема');
+  const locked = meta.data.locked.find((l) => l.key === 'clients');
+  assert.ok(locked, 'закритий розділ лишається видимим — фронт малює його замочком');
+  assert.equal(locked.label, 'Поточні клієнти');
+  assert.ok(!('fields' in locked) && !('can' in locked), 'у замкненому пункті немає полів чи прав — лише назва, група й іконка');
+});

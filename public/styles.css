@@ -72,6 +72,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav a:hover { background: var(--panel-2); }
 .nav a.active { background: var(--accent-soft); color: var(--text); font-weight: 500; }
 .nav a.active .icon { color: var(--accent); }
+.nav-locked {
+  display: flex; gap: 9px; align-items: center; padding: 7px 10px;
+  border-radius: 9px; color: var(--muted); font-size: 13.5px;
+  cursor: not-allowed; user-select: none;
+}
+.nav-locked .icon { color: var(--muted); }
+.nav-locked .icon:last-child { margin-left: auto; flex: 0 0 auto; }
 .main { display: flex; flex-direction: column; min-width: 0; height: 100%; overflow: hidden; }
 .topbar {
   display: flex; gap: 12px; align-items: center; padding: 12px 20px;

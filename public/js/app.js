@@ -12,7 +12,7 @@ import { renderProspecting } from './pages/prospecting.js';
 import { renderPlans } from './pages/plans.js';
 
 export const state = {
-  user: null, meta: {}, refs: {}, caps: {},
+  user: null, meta: {}, locked: [], refs: {}, caps: {},
   range: { from: daysAgo(29), to: today() },
 };
 
@@ -77,6 +77,7 @@ for (const id of ['#date-from', '#date-to']) {
 async function start() {
   const meta = await api.get('/meta');
   state.meta = meta.entities;
+  state.locked = meta.locked || [];
   state.refs = meta.refs;
   state.caps = meta.caps;
   $('#login').classList.add('hidden');
@@ -123,6 +124,11 @@ function buildNav() {
   for (const ent of Object.values(state.meta)) {
     links.push({ href: `#/e/${ent.key}`, icon: ent.icon || ent.key, label: ent.label, group: ent.group });
   }
+  // Розділи без доступу лишаються в меню замочком, а не зникають —
+  // людина бачить, що розділ існує, і знає, що саме просити в адміна.
+  for (const ent of state.locked) {
+    links.push({ icon: ent.icon || ent.key, label: ent.label, group: ent.group, locked: true });
+  }
   links.push({ href: '#/profile', icon: 'settings', label: 'Профіль і 2FA', group: 'Огляд' });
 
   const collapsed = collapsedGroups();
@@ -130,7 +136,10 @@ function buildNav() {
   for (const g of groups) {
     const items = el('div', { class: 'nav-items' });
     for (const l of links.filter((x) => x.group === g)) {
-      items.append(el('a', { href: l.href, 'data-href': l.href }, icon(l.icon, 16), l.label));
+      items.append(l.locked
+        ? el('span', { class: 'nav-locked', title: 'Немає доступу — зверніться до адміністратора' },
+          icon(l.icon, 16), l.label, icon('lock', 13))
+        : el('a', { href: l.href, 'data-href': l.href }, icon(l.icon, 16), l.label));
     }
     const box = el('div', { class: `nav-group${collapsed.has(g) ? ' collapsed' : ''}` });
     box.append(
