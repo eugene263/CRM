@@ -65,7 +65,7 @@ export async function serviceCardModal(serviceId, onChange = () => {}) {
       ? `Ціна пакета рахується автоматично сумою вкладених послуг: ${money(total)}`
       : `Додайте хоча б одну послугу, щоб «${service.name}» стала пакетом — доти це звичайна послуга`),
     el('div', { class: 'table-wrap' }, el('table', {},
-      el('thead', {}, el('tr', {}, el('th', {}, 'Послуга'), el('th', {}, 'Од.'), el('th', { class: 'num' }, 'К-сть'),
+      el('thead', {}, el('tr', {}, el('th', {}, 'Пакети'), el('th', {}, 'Од.'), el('th', { class: 'num' }, 'К-сть'),
         el('th', { class: 'num' }, 'Ціна'), el('th', { class: 'num' }, 'Сума'), el('th', {}, ''))),
       el('tbody', {}, ...(rows.length ? rows : [el('tr', {}, el('td', { colspan: 6, class: 'muted' }, 'Компонентів ще немає'))])))),
     el('button', { class: 'btn small', style: 'margin-top:8px', onclick: () => addItemForm(serviceId, onChange, box) }, withIcon('plus', 'Додати')));
@@ -100,10 +100,10 @@ async function addItemForm(serviceId, onChange, parentBox) {
   const service = el('select', {}, ...candidates.map((s) => el('option', { value: s.id }, `${s.name} (${money(s.price)}/${s.unit})`)));
   const quantity = el('input', { type: 'number', step: '0.1', value: 1 });
   const form = el('div', {},
-    el('div', { class: 'field' }, el('label', {}, 'Послуга'), service),
+    el('div', { class: 'field' }, el('label', {}, 'Пакети'), service),
     el('div', { class: 'field' }, el('label', {}, 'Кількість'), quantity));
 
-  const box2 = modal('Додати послугу в пакет', form, [el('button', {
+  const box2 = modal('Додати в пакети', form, [el('button', {
     class: 'btn primary',
     onclick: async () => {
       try {
