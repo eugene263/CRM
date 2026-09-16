@@ -569,6 +569,36 @@ test('канбан використовує той самий ендпоїнт �
   assert.ok(wonCol.leads.some((l) => l.id === lead.data.id));
 });
 
+// ── Картки списків пошуку ────────────────────────────────────────────────
+
+test('список пошуку: «Організації» — це його ліди, «Особи» зводить контакти по людині', async () => {
+  const list = await call('/api/prospect_lists', { method: 'POST', body: { name: 'Тест-список карток', kind: 'manual' } });
+  assert.equal(list.status, 200, JSON.stringify(list.data));
+  const listId = list.data.id;
+
+  const lead = await createLead({
+    company_name: 'Контакт-Лід', source: baseSource, list_id: listId,
+    contacts: [
+      { kind: 'email', value: 'ivan@example.com', person_name: 'Іван Петренко' },
+      { kind: 'phone', value: '+380001112233', person_name: 'Іван Петренко' },
+    ],
+  });
+  assert.equal(lead.status, 200, JSON.stringify(lead.data));
+
+  const orgs = await call(`/api/leads?list_id=${listId}&limit=50`);
+  assert.equal(orgs.data.total, 1, 'лід списку видно як «організацію»');
+  assert.equal(orgs.data.rows[0].company_name, 'Контакт-Лід');
+
+  const people = await call(`/api/prospecting/lists/${listId}/contacts`);
+  assert.equal(people.status, 200);
+  assert.equal(people.data.rows.length, 1, 'email і телефон однієї людини звелись в один рядок, а не два');
+  const row = people.data.rows[0];
+  assert.equal(row.name, 'Іван Петренко');
+  assert.equal(row.email, 'ivan@example.com');
+  assert.equal(row.phone, '+380001112233');
+  assert.equal(row.company_name, 'Контакт-Лід');
+});
+
 // ── Плани та норми ───────────────────────────────────────────────────────
 
 test('калькулятор розкладає ціль по клієнтах на денні норми', async () => {

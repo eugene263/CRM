@@ -402,6 +402,22 @@ export async function kanban(scopeSql, scopeParams) {
   };
 }
 
+// «Особи» списку пошуку: контакти зведено по людині (лід + person_name),
+// email/телефон розкладені по своїх колонках — щоб показати список
+// контактів так само, як людину показують у CRM-каталогах, а не рядок на
+// кожен канал зв'язку.
+export async function listContacts(listId, scopeSql, scopeParams) {
+  return all(
+    `SELECT l.id AS lead_id, l.company_name, l.tags,
+            COALESCE(lc.person_name, l.company_name) AS name,
+            MAX(CASE WHEN lc.kind='email' THEN lc.value END) AS email,
+            MAX(CASE WHEN lc.kind='phone' THEN lc.value END) AS phone
+       FROM lead_contacts lc JOIN leads l ON l.id = lc.lead_id
+      WHERE l.list_id = ? AND ${scopeSql}
+      GROUP BY l.id, COALESCE(lc.person_name, l.company_name)
+      ORDER BY name`, listId, ...scopeParams);
+}
+
 // Фонове: розморозка «не зараз» і підсвічування застою.
 export async function prospectingChecks() {
   const woken = await run(

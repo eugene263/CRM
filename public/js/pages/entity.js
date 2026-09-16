@@ -8,6 +8,7 @@ import { scriptStepsModal } from './scripts.js';
 import { clientCardModal } from './clients.js';
 import { serviceCardModal } from './servicePackage.js';
 import { renderLeadsKanban } from './leadsKanban.js';
+import { renderProspectListsCards } from './prospectLists.js';
 import { icon, withIcon } from '../icons.js';
 
 const PAGE = 50;
@@ -71,7 +72,7 @@ function formField(field, value, entKey, rowId) {
   return wrap;
 }
 
-function openForm(entKey, row, onSaved) {
+export function openForm(entKey, row, onSaved) {
   const ent = state.meta[entKey];
   const form = el('form', {});
   for (const f of ent.fields) {
@@ -108,6 +109,7 @@ function openForm(entKey, row, onSaved) {
 
 export async function renderEntity(entKey) {
   if (entKey === 'leads') return renderLeadsEntity();
+  if (entKey === 'prospect_lists') return renderProspectListsCards();
   return renderEntityTable(entKey);
 }
 
