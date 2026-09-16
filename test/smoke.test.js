@@ -603,12 +603,13 @@ test('AI-пошук без налаштованого ключа поверта�
   const list = await call('/api/prospect_lists', { method: 'POST', body: { name: 'Тест AI-пошуку', kind: 'manual' } });
   assert.equal(list.status, 200);
 
-  // У тестовому середовищі ANTHROPIC_API_KEY не заданий — саме так і на
-  // проді, доки власник не додасть його в змінні середовища сервісу.
+  // У тестовому середовищі жоден ключ не заданий — саме так і на проді,
+  // доки власник не додасть його в змінні середовища сервісу.
   const res = await call(`/api/prospecting/lists/${list.data.id}/ai-search`, {
     method: 'POST', body: { channel: 'google_maps', niche: 'кавʼярні', geo: 'Львів', count: 5 },
   });
   assert.equal(res.status, 400);
+  assert.match(res.data.error, /GEMINI_API_KEY/);
   assert.match(res.data.error, /ANTHROPIC_API_KEY/);
 
   assert.equal((await call(`/api/prospecting/lists/${list.data.id}/ai-search`, {
