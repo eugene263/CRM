@@ -839,3 +839,65 @@ CREATE TABLE IF NOT EXISTS service_cost_items (
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_cost_items ON service_cost_items(service_id);
+
+-- ── Клієнти ────────────────────────────────────────────────────────────────
+-- Лід виграно → клієнт створюється сам (setStatus у prospecting.js реагує на
+-- lead_statuses.is_won). Далі клієнт живе окремо від воронки: підписки на
+-- послуги з costing, історія статусів, нотатки — так само, як у ліда.
+CREATE TABLE IF NOT EXISTS clients (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',   -- active|paused|churned
+  source_lead_id INTEGER REFERENCES leads(id),
+  owner_user_id INTEGER REFERENCES users(id),
+  team_id INTEGER REFERENCES teams(id),
+  website TEXT,
+  geo_city TEXT,
+  geo_country TEXT,
+  vertical TEXT,
+  contact_name TEXT,
+  contact_email TEXT,
+  contact_phone TEXT,
+  started_at TEXT NOT NULL DEFAULT (date('now')),
+  paused_at TEXT,
+  churned_at TEXT,
+  churn_reason TEXT,
+  note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_clients_owner ON clients(owner_user_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_clients_source_lead ON clients(source_lead_id) WHERE source_lead_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS client_services (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  service_id INTEGER NOT NULL REFERENCES services(id),
+  quantity REAL NOT NULL DEFAULT 1,
+  price_override REAL,                     -- NULL → береться поточна ціна послуги
+  status TEXT NOT NULL DEFAULT 'active',   -- active|paused|canceled
+  started_at TEXT NOT NULL DEFAULT (date('now')),
+  ended_at TEXT,
+  note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_client_services ON client_services(client_id, status);
+
+CREATE TABLE IF NOT EXISTS client_notes (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  user_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS client_status_history (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  reason TEXT,
+  note TEXT,
+  user_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

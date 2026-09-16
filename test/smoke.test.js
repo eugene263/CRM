@@ -874,3 +874,99 @@ test('дозволений набір повідомлень пошуку клі
   assert.ok(Array.isArray(res.data.scripts));
   assert.ok(res.data.scripts.every((s) => 'name' in s && 'channel' in s));
 });
+
+// ── Клієнти ──────────────────────────────────────────────────────────────
+
+test('лід виграно → клієнт створюється сам, повторний виграш не дублює', async () => {
+  const lead = await createLead({ company_name: 'Переможний клієнт', source: baseSource }, { as: 'sales' });
+  const win = await call(`/api/prospecting/leads/${lead.data.id}/status`, { method: 'POST', as: 'sales', body: { status_code: 'won' } });
+  assert.equal(win.status, 200, JSON.stringify(win.data));
+  assert.ok(win.data.client_id, 'клієнт створився одразу');
+
+  const list = await call(`/api/clients?source_lead_id=${lead.data.id}`, { as: 'sales' });
+  assert.equal(list.data.total, 1);
+  assert.equal(list.data.rows[0].status, 'active');
+  assert.equal(list.data.rows[0].id, win.data.client_id);
+
+  const again = await call(`/api/prospecting/leads/${lead.data.id}/status`, { method: 'POST', as: 'sales', body: { status_code: 'won' } });
+  assert.equal(again.data.client_id, win.data.client_id, 'повторний виграш не створює другого клієнта');
+  assert.equal((await call(`/api/clients?source_lead_id=${lead.data.id}`, { as: 'sales' })).data.total, 1);
+});
+
+test('клієнтів видно за скоупом ролі: свій менеджер бачить, чужа роль без доступу, фінансист лише читає', async () => {
+  const mine = await call('/api/clients?limit=100', { as: 'sales' });
+  assert.equal(mine.status, 200);
+  assert.ok(mine.data.total >= 1, 'менеджер бачить свого щойно виграного клієнта');
+
+  assert.equal((await call('/api/clients', { as: 'creator' })).status, 403, 'у крієйтора немає модуля клієнтів');
+
+  const financeList = await call('/api/clients?limit=100', { as: 'finance' });
+  assert.equal(financeList.status, 200, 'фінансист бачить усіх клієнтів для звітності');
+  assert.ok(financeList.data.total >= mine.data.total);
+  const someClient = financeList.data.rows[0];
+  assert.equal(
+    (await call(`/api/clients/${someClient.id}`, { method: 'PUT', as: 'finance', body: { note: 'спроба фінансиста' } })).status,
+    403, 'фінансист лише читає, не редагує',
+  );
+});
+
+test('підписка на послугу рахує MRR — зі своєю ціною і без', async () => {
+  const service = (await call('/api/services?limit=1')).data.rows[0];
+  const client = (await call('/api/clients?limit=1', { as: 'sales' })).data.rows[0];
+
+  const added = await call(`/api/clients/${client.id}/services`, { method: 'POST', as: 'sales', body: { service_id: service.id, quantity: 2 } });
+  assert.equal(added.status, 200, JSON.stringify(added.data));
+  const row = added.data.services.find((s) => s.service_id === service.id);
+  const expected = Math.round(Number(service.price) * 2 * 100) / 100;
+  assert.equal(row.total, expected);
+  assert.equal(added.data.mrr, expected);
+
+  const overridden = await call(`/api/clients/${client.id}/services/${row.id}`, { method: 'PUT', as: 'sales', body: { price_override: 5 } });
+  assert.equal(overridden.status, 200);
+  const row2 = overridden.data.services.find((s) => s.id === row.id);
+  assert.equal(row2.total, 10, 'своя ціна × кількість');
+  assert.equal(overridden.data.mrr, 10);
+
+  const canceled = await call(`/api/clients/${client.id}/services/${row.id}`, { method: 'PUT', as: 'sales', body: { status: 'canceled' } });
+  assert.equal(canceled.status, 200);
+  assert.equal(canceled.data.mrr, 0, 'скасована підписка не рахується в MRR');
+  assert.ok(canceled.data.services.find((s) => s.id === row.id).ended_at, 'скасування проставляє дату завершення');
+});
+
+test('відтік вимагає причини, скасовує активні підписки; повернення в актив чистить поля', async () => {
+  const client = (await call('/api/clients?limit=1', { as: 'sales' })).data.rows[0];
+  const service = (await call('/api/services?limit=1')).data.rows[0];
+  await call(`/api/clients/${client.id}/services`, { method: 'POST', as: 'sales', body: { service_id: service.id, quantity: 1 } });
+
+  const noReason = await call(`/api/clients/${client.id}/status`, { method: 'POST', as: 'sales', body: { status: 'churned' } });
+  assert.equal(noReason.status, 400, 'без причини відтоку — відмова');
+
+  const churned = await call(`/api/clients/${client.id}/status`, { method: 'POST', as: 'sales', body: { status: 'churned', reason: 'price' } });
+  assert.equal(churned.status, 200);
+
+  const card = await call(`/api/clients/${client.id}/full`, { as: 'sales' });
+  assert.equal(card.data.client.status, 'churned');
+  assert.equal(card.data.client.churn_reason, 'price');
+  assert.ok(card.data.client.churned_at, 'дата відтоку проставлена');
+  assert.ok(card.data.services.every((s) => s.status !== 'active'), 'активні підписки скасувались разом із клієнтом');
+
+  const summaryAfterChurn = await call('/api/clients/summary', { as: 'finance' });
+  assert.ok(summaryAfterChurn.data.churned >= 1, 'відтеклий клієнт зʼявився у зведенні');
+  assert.ok(summaryAfterChurn.data.churned_30d >= 1);
+
+  const reactivated = await call(`/api/clients/${client.id}/status`, { method: 'POST', as: 'sales', body: { status: 'active' } });
+  assert.equal(reactivated.status, 200);
+  const card2 = await call(`/api/clients/${client.id}/full`, { as: 'sales' });
+  assert.equal(card2.data.client.status, 'active');
+  assert.equal(card2.data.client.churned_at, null, 'повернення в актив чистить дату відтоку');
+  assert.equal(card2.data.client.churn_reason, null, 'і причину відтоку');
+});
+
+test('зведення по клієнтах рахує лічильники й MRR узгоджено', async () => {
+  const summary = await call('/api/clients/summary', { as: 'finance' });
+  assert.equal(summary.status, 200);
+  assert.ok(summary.data.total >= 1);
+  assert.equal(summary.data.total, summary.data.active + summary.data.paused + summary.data.churned);
+  assert.ok('mrr' in summary.data && 'churn_rate_30d' in summary.data);
+  assert.equal((await call('/api/clients/summary', { as: 'creator' })).status, 403);
+});

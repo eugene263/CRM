@@ -11,6 +11,7 @@ import * as prospecting from './prospecting.js';
 import * as kpi from './kpi.js';
 import * as costing from './costing.js';
 import * as scripts from './scripts.js';
+import * as clients from './clients.js';
 import { encrypt, decrypt, token, hashIp } from './crypto.js';
 import { hashPassword } from './crypto.js';
 import * as auth from './auth.js';
@@ -619,6 +620,51 @@ export async function handleApi(req, res, url) {
       await audit({ user_id: user.id, action: 'role_delete', entity: 'roles', payload: { key: seg[1] }, ip });
       return ok(res, { ok: true });
     }
+  }
+
+  // --- клієнти ---
+  // Плоскі /api/clients і /api/clients/:id (список/створення/редагування
+  // картки) ідуть через генерик-CRUD нижче — тут лише вкладені дії
+  // (summary і все, що під /:id/...): підписки на послуги, нотатки, зміна
+  // статусу з бухгалтерією paused_at/churned_at, яких у генеричній сутності
+  // немає.
+  if (seg[0] === 'clients' && seg[1] === 'summary') {
+    if (!can(user, 'clients', 'read')) return fail(res, 403, 'Немає доступу до клієнтів');
+    const scope = scopeWhere(user, 'clients', 'c');
+    return ok(res, await clients.summary(scope.sql, scope.params));
+  }
+  if (seg[0] === 'clients' && seg[1] && seg[2]) {
+    if (!can(user, 'clients', 'read')) return fail(res, 403, 'Немає доступу до клієнтів');
+    const clientId = Number(seg[1]);
+    const canEdit = can(user, 'clients', 'update');
+
+    if (seg[2] === 'full' && req.method === 'GET') return ok(res, await clients.clientCard(clientId));
+    if (seg[2] === 'status' && req.method === 'POST') {
+      if (!canEdit) return fail(res, 403, 'Немає прав редагувати клієнта');
+      const body = await readBody(req);
+      return ok(res, await clients.setClientStatus(user, clientId, body.status, body));
+    }
+    if (seg[2] === 'notes' && req.method === 'POST') {
+      if (!canEdit) return fail(res, 403, 'Немає прав редагувати клієнта');
+      const body = await readBody(req);
+      const id = await insert('client_notes', { client_id: clientId, text: String(body.text || '').slice(0, 4000), user_id: user.id });
+      return ok(res, { id });
+    }
+    if (seg[2] === 'services') {
+      if (req.method === 'POST' && !seg[3]) {
+        if (!canEdit) return fail(res, 403, 'Немає прав редагувати клієнта');
+        return ok(res, await clients.addService(clientId, await readBody(req)));
+      }
+      if (seg[3] && req.method === 'PUT') {
+        if (!canEdit) return fail(res, 403, 'Немає прав редагувати клієнта');
+        return ok(res, await clients.updateService(clientId, Number(seg[3]), await readBody(req)));
+      }
+      if (seg[3] && req.method === 'DELETE') {
+        if (!canEdit) return fail(res, 403, 'Немає прав редагувати клієнта');
+        return ok(res, await clients.removeService(clientId, Number(seg[3])));
+      }
+    }
+    return fail(res, 404, 'Немає такого ендпоїнта');
   }
 
   // --- генерик CRUD ---

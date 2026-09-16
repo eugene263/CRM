@@ -19,6 +19,11 @@ const PROSPECTING_SELF = {
   prospect_lists: R('write', 'team'), leads: R('full', 'own'), touches: R('read', 'own'),
   message_templates: R('read', 'all'), scripts: R('read', 'all'), lead_statuses: R('read', 'all'), dictionaries: R('read', 'all'),
   suppression_list: R('write', 'all'),
+  // Виграний лід — це його клієнт: веде далі той самий менеджер.
+  clients: R('full', 'own'),
+  // Щоб підписати клієнта на послугу, менеджеру потрібен прайс — без права
+  // редагувати собівартість.
+  services: R('read', 'all'),
   // Свою норму менеджер бачить, але не редагує — інакше план втрачає сенс.
   kpi_plans: R('read', 'own'), channel_limits: R('read', 'own'), work_calendar: R('read', 'own'),
   ramp_up_plans: R('read', 'own'), bonus_rules: R('read', 'own'), quality_flags: R('read', 'own'),
@@ -39,6 +44,7 @@ export const defaultMatrix = {
   teamlead: {
     ...spread(RESOURCE, R('write', 'team')),
     prospect_lists: R('full', 'team'), leads: R('full', 'team'), touches: R('read', 'team'),
+    clients: R('full', 'team'),
     message_templates: R('full', 'all'), scripts: R('full', 'all'), lead_statuses: R('write', 'all'), dictionaries: R('write', 'all'),
     suppression_list: R('full', 'all'),
     kpi_plans: R('full', 'team'), channel_limits: R('full', 'all'), work_calendar: R('full', 'team'),
@@ -122,6 +128,7 @@ export const defaultMatrix = {
     audit_log: R('read', 'all'),
     notifications: R('read', 'all'),
     devices: R('read', 'all'), sims: R('read', 'all'), proxies: R('read', 'all'), mail_accounts: R('read', 'all'),
+    clients: R('read', 'all'),
   },
 
   // Аналітик читає цифри, але не сейф: інакше «read all» тихо відкриває креди.

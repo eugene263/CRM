@@ -456,6 +456,32 @@ export const entities = {
     ],
   },
 
+  // ── Клієнти ────────────────────────────────────────────────────────────
+  // Лід виграно → клієнт створюється сам; тут він живе окремо від воронки.
+  clients: {
+    label: 'Клієнти', group: 'Клієнти', icon: 'award', ownField: 'owner_user_id', teamField: 'team_id',
+    title: 'name', defaultSort: 'created_at DESC',
+    fields: [
+      { name: 'name', label: 'Клієнт', type: 'text', required: true, list: true },
+      { name: 'status', label: 'Статус', type: 'select', list: true, readOnly: true, options: S(
+        ['active', 'Активний'], ['paused', 'На паузі'], ['churned', 'Пішов']) },
+      { name: 'geo_city', label: 'Місто', type: 'text', list: true },
+      { name: 'geo_country', label: 'Країна', type: 'text' },
+      { name: 'vertical', label: 'Вертикаль', type: 'text', list: true },
+      { name: 'website', label: 'Сайт', type: 'url' },
+      { name: 'contact_name', label: 'Контактна особа', type: 'text' },
+      { name: 'contact_email', label: 'Email', type: 'text' },
+      { name: 'contact_phone', label: 'Телефон', type: 'text' },
+      { name: 'owner_user_id', label: 'Менеджер', type: 'ref', ref: 'users', list: true },
+      { name: 'team_id', label: 'Команда', type: 'ref', ref: 'teams' },
+      { name: 'source_lead_id', label: 'Із ліда', type: 'ref', ref: 'leads', readOnly: true },
+      { name: 'started_at', label: 'Клієнт з', type: 'date', list: true },
+      { name: 'churned_at', label: 'Пішов', type: 'date', readOnly: true, list: true },
+      { name: 'churn_reason', label: 'Причина відтоку', type: 'text', readOnly: true },
+      { name: 'note', label: 'Нотатка', type: 'textarea' },
+    ],
+  },
+
   // ── Плани та норми ─────────────────────────────────────────────────────
   kpi_plans: {
     label: 'Плани та норми', group: 'Плани', icon: 'gauge', ownField: 'user_id', teamField: 'team_id',

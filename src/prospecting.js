@@ -3,6 +3,7 @@
 import { all, get, run, insert, update, audit } from './db.js';
 import { notify } from './telegram.js';
 import { checkChannelLimit } from './kpi.js';
+import { ensureClientFromLead } from './clients.js';
 
 const now = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 const today = () => new Date().toISOString().slice(0, 10);
@@ -193,7 +194,14 @@ export async function setStatus(user, leadId, statusCode, extra = {}) {
 
   await update('leads', leadId, patch);
   await insert('lead_status_history', { lead_id: leadId, from_status: lead.status_code, to_status: statusCode, user_id: user.id, note: extra.note ?? null });
-  return { ok: true, status: statusCode };
+
+  // Лід виграно → клієнт заводиться сам, щоб команда не робила це руками.
+  let clientId = null;
+  if (status.is_won) {
+    clientId = await ensureClientFromLead({ ...lead, ...patch }, user.id);
+    await notify('client', `🏆 Новий клієнт: «${lead.company_name}»`, lead.owner_user_id);
+  }
+  return { ok: true, status: statusCode, client_id: clientId };
 }
 
 // ── Тачі ──────────────────────────────────────────────────────────────────

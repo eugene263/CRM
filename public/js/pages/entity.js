@@ -5,6 +5,7 @@ import { el, money, num, badge, modal, toast } from '../ui.js';
 import { credentialActions } from './vault.js';
 import { openLead } from './prospecting.js';
 import { scriptStepsModal } from './scripts.js';
+import { clientCardModal } from './clients.js';
 import { icon, withIcon } from '../icons.js';
 
 const PAGE = 50;
@@ -163,6 +164,10 @@ export async function renderEntity(entKey) {
             class: 'btn small icon-only', style: 'margin-left:6px', title: 'Кроки скрипту',
             onclick: () => scriptStepsModal(row.id, load),
           }, icon('layers', 15)) : null,
+          entKey === 'clients' ? el('button', {
+            class: 'btn small icon-only', style: 'margin-left:6px', title: 'Картка клієнта',
+            onclick: () => clientCardModal(row.id, load),
+          }, icon('award', 15)) : null,
           entKey === 'users' && state.caps.settings && row.status === 'active' ? el('button', {
             class: 'btn small danger icon-only', style: 'margin-left:6px', title: 'Офбординг',
             onclick: async () => {
@@ -208,6 +213,17 @@ export async function renderEntity(entKey) {
   if (ent.scope !== 'all') {
     box.append(el('div', { class: 'muted', style: 'font-size:12px' },
       ent.scope === 'own' ? 'Видно лише ваші записи.' : 'Видно записи вашої команди.'));
+  }
+  if (entKey === 'clients') {
+    const tiles = el('div', { class: 'tiles', style: 'margin-bottom:14px' });
+    box.prepend(tiles);
+    const s = await api.get('/clients/summary');
+    tiles.append(
+      el('div', { class: 'tile' }, el('div', { class: 'label' }, 'Активні клієнти'), el('div', { class: 'value pos' }, num(s.active))),
+      el('div', { class: 'tile' }, el('div', { class: 'label' }, 'MRR'), el('div', { class: 'value' }, money(s.mrr))),
+      el('div', { class: 'tile' }, el('div', { class: 'label' }, 'На паузі'), el('div', { class: 'value' }, num(s.paused))),
+      el('div', { class: 'tile' }, el('div', { class: 'label' }, 'Відтік за 30д'),
+        el('div', { class: `value ${s.churned_30d ? 'neg' : ''}` }, s.churn_rate_30d != null ? `${s.churn_rate_30d}%` : '—')));
   }
   await load();
   return box;
