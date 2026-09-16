@@ -17,6 +17,7 @@ import { expireOverdue } from './src/vault.js';
 import { seedProspecting, prospectingChecks } from './src/prospecting.js';
 import { seedKpi, kpiChecks } from './src/kpi.js';
 import { seedCosting } from './src/costing.js';
+import { seedScripts } from './src/scripts.js';
 import { backupDatabase } from './src/backup.js';
 import { captureError, installGlobalHandlers } from './src/errors.js';
 
@@ -92,6 +93,7 @@ await syncNewEntities();
 await seedProspecting();
 await seedKpi();
 await seedCosting();
+await seedScripts();
 await bootstrapOwner();
 
 if (ROLE !== 'postback') {

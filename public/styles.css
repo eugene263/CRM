@@ -140,10 +140,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 td.editable { cursor: text; }
 td.editable .editable-value { border-bottom: 1px dashed transparent; }
 td.editable:hover .editable-value { border-bottom-color: var(--muted); }
-td.editable input {
+td.editable input, td.editable textarea {
   width: 100%; min-width: 70px; padding: 3px 6px; border-radius: 6px;
-  background: var(--panel); border: 1px solid var(--accent);
+  background: var(--panel); border: 1px solid var(--accent); font: inherit;
 }
+td.editable textarea { min-width: 220px; resize: vertical; }
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; border: 1px solid var(--line); }
 .badge.active, .badge.approved, .badge.paid, .badge.live, .badge.done,

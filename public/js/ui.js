@@ -88,6 +88,7 @@ export function lineChart(rows, series, { height = 190 } = {}) {
 // Escape скасовує; порожній рядок для number-полів не шле запит.
 export function editableCell(value, { type = 'text', format = (v) => v ?? '—', onSave, className = '' } = {}) {
   const td = el('td', { class: className });
+  const multiline = type === 'textarea';
   let editing = false;
 
   function renderView() {
@@ -102,15 +103,18 @@ export function editableCell(value, { type = 'text', format = (v) => v ?? '—',
     if (editing) return;
     editing = true;
     td.onclick = null;
-    const input = el('input', {
-      type: type === 'number' ? 'number' : 'text',
-      step: type === 'number' ? 'any' : undefined,
-      value: value ?? '',
-    });
+    const input = multiline
+      ? el('textarea', { rows: 3, value: value ?? '' })
+      : el('input', {
+        type: type === 'number' ? 'number' : 'text',
+        step: type === 'number' ? 'any' : undefined,
+        value: value ?? '',
+      });
+    if (multiline) input.value = value ?? '';   // textarea тексту не бере через атрибут value
     td.textContent = '';
     td.append(input);
     input.focus();
-    input.select();
+    if (!multiline) input.select();
 
     let done = false;
     const commit = async () => {
@@ -130,7 +134,8 @@ export function editableCell(value, { type = 'text', format = (v) => v ?? '—',
     };
     input.addEventListener('blur', commit);
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      // У textarea звичайний Enter — новий рядок; зберігає лише Ctrl/Cmd+Enter.
+      if (e.key === 'Enter' && (!multiline || e.ctrlKey || e.metaKey)) { e.preventDefault(); input.blur(); }
       if (e.key === 'Escape') { done = true; renderView(); }
     });
   }

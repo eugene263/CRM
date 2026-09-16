@@ -239,6 +239,7 @@ export async function logTouch(user, leadId, payload, { force = false } = {}) {
     direction: payload.direction || 'out',
     from_account: payload.from_account ?? null,
     template_id: payload.template_id ?? null,
+    script_id: payload.script_id ?? null,
     message_text: payload.message_text ?? null,
     attachments: payload.attachments ? JSON.stringify(payload.attachments) : null,
     delivery_status: payload.delivery_status || 'sent',

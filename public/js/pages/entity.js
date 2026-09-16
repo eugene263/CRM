@@ -4,6 +4,7 @@ import { state, reloadRefs } from '../app.js';
 import { el, money, num, badge, modal, toast } from '../ui.js';
 import { credentialActions } from './vault.js';
 import { openLead } from './prospecting.js';
+import { scriptStepsModal } from './scripts.js';
 import { icon, withIcon } from '../icons.js';
 
 const PAGE = 50;
@@ -158,6 +159,10 @@ export async function renderEntity(entKey) {
             class: 'btn small icon-only', style: 'margin-left:6px', title: 'Картка ліда',
             onclick: () => openLead(row.id, load),
           }, icon('folder', 15)) : null,
+          entKey === 'scripts' ? el('button', {
+            class: 'btn small icon-only', style: 'margin-left:6px', title: 'Кроки скрипту',
+            onclick: () => scriptStepsModal(row.id, load),
+          }, icon('layers', 15)) : null,
           entKey === 'users' && state.caps.settings && row.status === 'active' ? el('button', {
             class: 'btn small danger icon-only', style: 'margin-left:6px', title: 'Офбординг',
             onclick: async () => {

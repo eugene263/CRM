@@ -752,3 +752,125 @@ test('крієйтор не бачить собівартості, фінанс�
   assert.equal((await call('/api/services', { as: 'creator' })).status, 403);
   assert.equal((await call('/api/costing/services', { as: 'finance' })).status, 200);
 });
+
+// ── Шаблони скриптів ─────────────────────────────────────────────────────
+
+test('демо-скрипти сідяться з кроками й запереченнями', async () => {
+  const { rows } = (await call('/api/scripts?limit=10')).data;
+  assert.ok(rows.length >= 2, 'демо-скрипти на місці');
+  const cold = rows.find((s) => s.category === 'cold_call');
+  assert.ok(cold);
+  const full = (await call(`/api/scripts/${cold.id}/full`)).data;
+  assert.ok(full.steps.length >= 3, 'кроки розмови на місці');
+  assert.ok(full.objections.length >= 2, 'заперечення на місці');
+  assert.ok(full.steps.every((s) => s.kind === 'step'));
+  assert.ok(full.objections.every((s) => s.kind === 'objection'));
+});
+
+test('новий скрипт створюється порожнім і наповнюється кроками', async () => {
+  const created = await call('/api/scripts', {
+    method: 'POST', body: { name: 'Тестовий скрипт', channel: 'call', category: 'test' },
+  });
+  assert.equal(created.status, 200);
+  const id = created.data.id;
+
+  const step = await call(`/api/scripts/${id}/steps`, {
+    method: 'POST', body: { kind: 'step', title: 'Привітання', body: 'Добрий день', sort_order: 10 },
+  });
+  assert.equal(step.status, 200);
+  assert.equal(step.data.steps.length, 1);
+
+  const objection = await call(`/api/scripts/${id}/steps`, {
+    method: 'POST', body: { kind: 'objection', title: 'Дорого', body: 'Порахуймо разом', sort_order: 10 },
+  });
+  assert.equal(objection.data.objections.length, 1);
+
+  const full = (await call(`/api/scripts/${id}/full`)).data;
+  assert.equal(full.steps[0].title, 'Привітання');
+  assert.equal(full.objections[0].title, 'Дорого');
+});
+
+test('крок без заголовка не створюється', async () => {
+  const created = await call('/api/scripts', { method: 'POST', body: { name: 'Без кроків', channel: 'call' } });
+  const res = await call(`/api/scripts/${created.data.id}/steps`, { method: 'POST', body: { kind: 'step', title: '  ' } });
+  assert.equal(res.status, 400);
+});
+
+test('редагування кроку зберігає інші поля рядка', async () => {
+  const created = await call('/api/scripts', { method: 'POST', body: { name: 'Правка кроку', channel: 'call' } });
+  const id = created.data.id;
+  const step = await call(`/api/scripts/${id}/steps`, {
+    method: 'POST', body: { kind: 'step', title: 'Крок 1', body: 'Текст кроку', sort_order: 10 },
+  });
+  const stepId = step.data.steps[0].id;
+
+  // Патчимо лише sort_order, як це робить інлайн-редагування на фронті —
+  // title і body мають лишитись, бо клієнт надсилає їх назад повністю.
+  const patched = await call(`/api/scripts/${id}/steps`, {
+    method: 'POST', body: { id: stepId, kind: 'step', title: 'Крок 1', body: 'Текст кроку', sort_order: 20 },
+  });
+  assert.equal(patched.data.steps[0].sort_order, 20);
+  assert.equal(patched.data.steps[0].title, 'Крок 1');
+  assert.equal(patched.data.steps[0].body, 'Текст кроку');
+});
+
+test('крок видаляється, скрипт лишається', async () => {
+  const created = await call('/api/scripts', { method: 'POST', body: { name: 'Видалення кроку', channel: 'call' } });
+  const id = created.data.id;
+  const step = await call(`/api/scripts/${id}/steps`, { method: 'POST', body: { kind: 'step', title: 'Тимчасовий крок' } });
+  const stepId = step.data.steps[0].id;
+
+  const removed = await call(`/api/scripts/${id}/steps/${stepId}`, { method: 'DELETE' });
+  assert.equal(removed.status, 200);
+  assert.equal(removed.data.steps.length, 0);
+  assert.equal((await call(`/api/scripts/${id}`)).status, 200, 'сам скрипт нікуди не подівся');
+});
+
+test('дублювання скрипта копіює кроки й заперечення', async () => {
+  const created = await call('/api/scripts', { method: 'POST', body: { name: 'Оригінал', channel: 'call' } });
+  const id = created.data.id;
+  await call(`/api/scripts/${id}/steps`, { method: 'POST', body: { kind: 'step', title: 'Крок А' } });
+  await call(`/api/scripts/${id}/steps`, { method: 'POST', body: { kind: 'objection', title: 'Заперечення А' } });
+
+  const dup = await call(`/api/scripts/${id}/duplicate`, { method: 'POST', body: {} });
+  assert.equal(dup.status, 200);
+  assert.match(dup.data.script.name, /копія/);
+  assert.equal(dup.data.script.is_active, 0, 'копія неактивна, щоб не плутати з оригіналом');
+  assert.equal(dup.data.steps.length, 1);
+  assert.equal(dup.data.objections.length, 1);
+  assert.equal(dup.data.steps[0].title, 'Крок А');
+});
+
+test('тач можна привʼязати до скрипту, і це видно в картці ліда', async () => {
+  const script = (await call('/api/scripts?category=cold_call&limit=1')).data.rows[0];
+  const lead = await createLead({ company_name: 'Лід зі скриптом', source: baseSource });
+  const touch = await call(`/api/prospecting/leads/${lead.data.id}/touch`, {
+    method: 'POST', body: { channel: 'call', message_text: 'дзвонили за скриптом', script_id: script.id },
+  });
+  assert.equal(touch.status, 200);
+  const card = await call(`/api/prospecting/leads/${lead.data.id}`);
+  assert.equal(card.data.touches[0].script_id, script.id);
+});
+
+test('менеджер з пошуку читає скрипти, але не редагує їх', async () => {
+  const list = await call('/api/scripts?limit=10', { as: 'sales' });
+  assert.equal(list.status, 200);
+  assert.ok(list.data.rows.length > 0);
+
+  const created = await call('/api/scripts', { method: 'POST', as: 'sales', body: { name: 'Спроба менеджера', channel: 'call' } });
+  assert.equal(created.status, 403);
+
+  const anyScript = list.data.rows[0];
+  assert.equal((await call(`/api/scripts/${anyScript.id}/steps`, { method: 'POST', as: 'sales', body: { kind: 'step', title: 'x' } })).status, 403);
+});
+
+test('крієйтор і монтажер не бачать розділ скриптів', async () => {
+  assert.equal((await call('/api/scripts', { as: 'creator' })).status, 403);
+});
+
+test('дозволений набір повідомлень пошуку клієнтів містить активні скрипти', async () => {
+  const res = await call('/api/prospecting/dictionaries', { as: 'sales' });
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.data.scripts));
+  assert.ok(res.data.scripts.every((s) => 'name' in s && 'channel' in s));
+});

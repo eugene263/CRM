@@ -393,6 +393,7 @@ export const entities = {
       { name: 'delivery_status', label: 'Доставка', type: 'text', list: true },
       { name: 'outcome', label: 'Результат', type: 'text', list: true },
       { name: 'message_text', label: 'Текст', type: 'textarea' },
+      { name: 'script_id', label: 'Скрипт', type: 'ref', ref: 'scripts' },
       { name: 'user_id', label: 'Хто', type: 'ref', ref: 'users', list: true },
     ],
   },
@@ -405,6 +406,18 @@ export const entities = {
       { name: 'body', label: 'Текст', type: 'textarea', required: true },
       { name: 'variables', label: 'Змінні', type: 'text', hint: '{{company}}, {{followers}}, {{days_since_post}}' },
       { name: 'is_active', label: 'Активний', type: 'number', list: true },
+    ],
+  },
+  scripts: {
+    label: 'Шаблони скриптів', group: 'Пошук клієнтів', icon: 'script', title: 'name',
+    fields: [
+      { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
+      { name: 'category', label: 'Категорія', type: 'text', list: true, hint: 'cold_call, demo, onboarding…' },
+      { name: 'channel', label: 'Канал', type: 'select', required: true, list: true, options: S(
+        ['call', 'Дзвінок'], ['meeting', 'Зустріч'], ['general', 'Загальний']) },
+      { name: 'description', label: 'Опис', type: 'textarea', hint: 'коли й навіщо використовувати цей скрипт' },
+      { name: 'is_active', label: 'Активний', type: 'number', list: true },
+      { name: 'updated_at', label: 'Оновлено', type: 'datetime', readOnly: true, list: true },
     ],
   },
   lead_statuses: {

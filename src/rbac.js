@@ -17,7 +17,7 @@ const VAULT_SELF = { credentials: R('read', 'own'), credential_grants: R('read',
 // Пошук клієнтів: менеджер працює зі своїми лідами, довідники лише читає.
 const PROSPECTING_SELF = {
   prospect_lists: R('write', 'team'), leads: R('full', 'own'), touches: R('read', 'own'),
-  message_templates: R('read', 'all'), lead_statuses: R('read', 'all'), dictionaries: R('read', 'all'),
+  message_templates: R('read', 'all'), scripts: R('read', 'all'), lead_statuses: R('read', 'all'), dictionaries: R('read', 'all'),
   suppression_list: R('write', 'all'),
   // Свою норму менеджер бачить, але не редагує — інакше план втрачає сенс.
   kpi_plans: R('read', 'own'), channel_limits: R('read', 'own'), work_calendar: R('read', 'own'),
@@ -39,7 +39,7 @@ export const defaultMatrix = {
   teamlead: {
     ...spread(RESOURCE, R('write', 'team')),
     prospect_lists: R('full', 'team'), leads: R('full', 'team'), touches: R('read', 'team'),
-    message_templates: R('full', 'all'), lead_statuses: R('write', 'all'), dictionaries: R('write', 'all'),
+    message_templates: R('full', 'all'), scripts: R('full', 'all'), lead_statuses: R('write', 'all'), dictionaries: R('write', 'all'),
     suppression_list: R('full', 'all'),
     kpi_plans: R('full', 'team'), channel_limits: R('full', 'all'), work_calendar: R('full', 'team'),
     ramp_up_plans: R('full', 'team'), bonus_rules: R('read', 'all'), quality_flags: R('read', 'team'),

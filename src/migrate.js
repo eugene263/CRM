@@ -19,6 +19,15 @@ const migrations = [
       }
     },
   },
+  {
+    // Таблиці scripts/script_steps створює сам schema.sql (CREATE TABLE IF
+    // NOT EXISTS), а от нову колонку в наявній touches треба докотити ALTER'ом.
+    id: '2026-09-17-touches-script',
+    async up() {
+      const cols = await columnsOf('touches');
+      if (!cols.has('script_id')) await run('ALTER TABLE touches ADD COLUMN script_id INTEGER');
+    },
+  },
 ];
 
 export async function migrate() {

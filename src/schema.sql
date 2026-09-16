@@ -588,6 +588,31 @@ CREATE TABLE IF NOT EXISTS message_templates (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Шаблони скриптів: на відміну від message_templates (готовий текст
+-- повідомлення), скрипт — це послідовність кроків розмови плюс окремий
+-- блок «заперечення → відповідь» для дзвінків і зустрічей.
+CREATE TABLE IF NOT EXISTS scripts (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  category TEXT,                           -- cold_call|demo|onboarding|renewal|...
+  channel TEXT NOT NULL DEFAULT 'call',    -- call|meeting|general
+  description TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS script_steps (
+  id INTEGER PRIMARY KEY,
+  script_id INTEGER NOT NULL REFERENCES scripts(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'step',       -- step|objection
+  title TEXT NOT NULL,
+  body TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 100
+);
+CREATE INDEX IF NOT EXISTS idx_script_steps ON script_steps(script_id, kind, sort_order);
+
 CREATE TABLE IF NOT EXISTS touches (
   id INTEGER PRIMARY KEY,
   lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
@@ -596,6 +621,7 @@ CREATE TABLE IF NOT EXISTS touches (
   direction TEXT NOT NULL DEFAULT 'out',   -- out|in
   from_account TEXT,                       -- з якого нашого акаунта/скриньки
   template_id INTEGER REFERENCES message_templates(id),
+  script_id INTEGER REFERENCES scripts(id),
   message_text TEXT,
   attachments TEXT,
   delivery_status TEXT NOT NULL DEFAULT 'sent',  -- sent|delivered|read|failed|blocked

@@ -10,6 +10,7 @@ import * as vault from './vault.js';
 import * as prospecting from './prospecting.js';
 import * as kpi from './kpi.js';
 import * as costing from './costing.js';
+import * as scripts from './scripts.js';
 import { encrypt, decrypt, token, hashIp } from './crypto.js';
 import { hashPassword } from './crypto.js';
 import * as auth from './auth.js';
@@ -391,6 +392,28 @@ export async function handleApi(req, res, url) {
     return fail(res, 404, 'Немає такого ендпоїнта');
   }
 
+  // --- шаблони скриптів ---
+  // Сам /api/scripts (список/створення/редагування назви, категорії, каналу)
+  // іде через генерик-CRUD нижче — тут лише вкладені кроки, яких у генеричній
+  // сутності немає.
+  if (seg[0] === 'scripts' && seg[1] && (seg[2] === 'full' || seg[2] === 'steps' || seg[2] === 'duplicate')) {
+    if (!can(user, 'scripts', 'read')) return fail(res, 403, 'Немає доступу до скриптів');
+    const scriptId = Number(seg[1]);
+    const canEdit = can(user, 'scripts', 'update');
+
+    if (seg[2] === 'full') return ok(res, await scripts.scriptWithSteps(scriptId));
+    if (seg[2] === 'duplicate' && req.method === 'POST') {
+      if (!can(user, 'scripts', 'create')) return fail(res, 403, 'Немає прав створювати скрипти');
+      return ok(res, await scripts.duplicateScript(scriptId, user.id));
+    }
+    if (seg[2] === 'steps') {
+      if (!canEdit) return fail(res, 403, 'Немає прав редагувати скрипт');
+      if (req.method === 'POST' && !seg[3]) return ok(res, await scripts.saveStep(scriptId, await readBody(req)));
+      if (req.method === 'DELETE' && seg[3]) return ok(res, await scripts.deleteStep(scriptId, Number(seg[3])));
+    }
+    return fail(res, 404, 'Немає такого ендпоїнта');
+  }
+
   // --- плани та норми ---
   if (seg[0] === 'kpi') {
     if (seg[1] === 'my-day') return ok(res, await kpi.myDay(user, query.date));
@@ -433,6 +456,9 @@ export async function handleApi(req, res, url) {
         statuses: await all('SELECT * FROM lead_statuses WHERE is_active=1 ORDER BY sort_order'),
         dictionaries: await all('SELECT * FROM dictionaries WHERE is_active=1 ORDER BY kind, sort_order'),
         templates: await all('SELECT id, name, channel, subject, body FROM message_templates WHERE is_active=1 ORDER BY name'),
+        scripts: can(user, 'scripts', 'read')
+          ? await all('SELECT id, name, category, channel FROM scripts WHERE is_active=1 ORDER BY name')
+          : [],
       });
     }
     if (seg[1] === 'duplicates') {

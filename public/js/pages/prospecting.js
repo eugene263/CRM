@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { state } from '../app.js';
 import { el, modal, toast, num, pct } from '../ui.js';
 import { icon, withIcon } from '../icons.js';
+import { scriptPickerModal, scriptViewerModal } from './scripts.js';
 
 let dicts = null;
 const dictOf = (kind) => (dicts?.dictionaries || []).filter((d) => d.kind === kind);
@@ -68,6 +69,12 @@ export async function openLead(leadId, onChange = () => {}) {
   const actions = el('div', { class: 'row', style: 'margin-top:12px' },
     el('button', { class: 'btn primary', style: 'flex:0 0 auto', onclick: () => { box.remove(); touchForm(lead, contacts, onChange); } }, withIcon('send', 'Записати тач')),
     el('button', { class: 'btn', style: 'flex:0 0 auto', onclick: () => { box.remove(); statusForm(lead, onChange); } }, withIcon('flag', 'Змінити статус')),
+    (dicts.scripts || []).length ? el('button', {
+      class: 'btn', style: 'flex:0 0 auto',
+      onclick: () => scriptPickerModal(dicts.scripts, {
+        onUseInTouch: (script) => { box.remove(); touchForm(lead, contacts, onChange, script.id); },
+      }),
+    }, withIcon('script', 'Скрипт')) : null,
     tasks.filter((t) => t.status === 'open').length
       ? el('span', { class: 'muted' }, `відкритих задач: ${tasks.filter((t) => t.status === 'open').length}`) : null);
 
@@ -80,7 +87,7 @@ export async function openLead(leadId, onChange = () => {}) {
 }
 
 // ── Форма тача ────────────────────────────────────────────────────────────
-function touchForm(lead, contacts, onChange) {
+function touchForm(lead, contacts, onChange, presetScriptId = null) {
   const channel = el('select', {}, ...dictOf('touch_channel').map((d) => el('option', { value: d.code }, d.label)));
   const direction = el('select', {}, el('option', { value: 'out' }, 'Вихідний'), el('option', { value: 'in' }, 'Вхідний (відповідь)'));
   const from = el('input', { placeholder: 'з якого нашого акаунта/скриньки' });
@@ -88,6 +95,13 @@ function touchForm(lead, contacts, onChange) {
     ...contacts.map((c) => el('option', { value: c.id }, `${c.kind}: ${c.value}`)));
   const template = el('select', {}, el('option', { value: '' }, 'без шаблону'),
     ...(dicts.templates || []).map((t) => el('option', { value: t.id }, t.name)));
+  const script = el('select', {}, el('option', { value: '' }, 'без скрипту'),
+    ...(dicts.scripts || []).map((s) => el('option', { value: s.id, selected: presetScriptId === s.id }, s.name)));
+  const viewScript = el('button', { class: 'btn small icon-only', type: 'button', title: 'Переглянути скрипт' }, icon('eye', 14));
+  viewScript.addEventListener('click', () => {
+    if (!script.value) return toast('Оберіть скрипт зі списку', true);
+    scriptViewerModal(Number(script.value));
+  });
   const text = el('textarea', { rows: 5, placeholder: 'текст повідомлення — без нього тач не зараховується' });
   const delivery = el('select', {}, ...[['sent', 'Надіслано'], ['delivered', 'Доставлено'], ['read', 'Прочитано'], ['failed', 'Не доставлено'], ['blocked', 'Заблокували']]
     .map(([v, l]) => el('option', { value: v }, l)));
@@ -110,6 +124,8 @@ function touchForm(lead, contacts, onChange) {
       el('div', {}, el('label', {}, 'З якого акаунта'), from),
       el('div', {}, el('label', {}, 'Кому'), contact)),
     el('div', { class: 'field' }, el('label', {}, 'Шаблон'), template),
+    (dicts.scripts || []).length ? el('div', { class: 'field' }, el('label', {}, 'Скрипт розмови'),
+      el('div', { style: 'display:flex;gap:6px' }, script, viewScript)) : null,
     el('div', { class: 'field' }, el('label', {}, 'Текст'), text),
     el('div', { class: 'field' }, el('label', {}, 'Статус доставки'), delivery));
 
@@ -119,6 +135,7 @@ function touchForm(lead, contacts, onChange) {
         channel: channel.value, direction: direction.value, from_account: from.value || null,
         contact_id: contact.value ? Number(contact.value) : null,
         template_id: template.value ? Number(template.value) : null,
+        script_id: script.value ? Number(script.value) : null,
         message_text: text.value, delivery_status: delivery.value,
       });
       box.remove();
