@@ -629,7 +629,7 @@ export const entities = {
   services: {
     label: 'Послуги та ціни', group: 'Фінанси', icon: 'calculator', title: 'name',
     fields: [
-      { name: 'name', label: 'Послуга', type: 'text', required: true, list: true },
+      { name: 'name', label: 'Пакети', type: 'text', required: true, list: true },
       { name: 'is_package', label: 'Тип', type: 'select', list: true, readOnly: true, options: S(
         ['0', 'Послуги'], ['1', 'Пакети']) },
       { name: 'category', label: 'Категорія', type: 'text', list: true },
