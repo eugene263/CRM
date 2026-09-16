@@ -52,7 +52,7 @@ export async function renderLeadsKanban(onChange = () => {}) {
   }
 
   function renderCard(lead) {
-    const card = el('div', { class: 'kanban-card', draggable: true },
+    const card = el('div', { class: 'kanban-card', draggable: 'true' },
       el('div', { class: 'kanban-card-title' }, lead.company_name),
       el('div', { class: 'muted', style: 'font-size:12px' }, [lead.geo_city, lead.vertical].filter(Boolean).join(' · ') || '—'),
       el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-top:6px' },
