@@ -376,7 +376,7 @@ export const entities = {
     ],
   },
   leads: {
-    label: 'Ліди', group: 'Клієнти', icon: 'target', ownField: 'owner_user_id', teamField: 'team_id', title: 'company_name',
+    label: 'База лідів', group: 'Клієнти', icon: 'target', ownField: 'owner_user_id', teamField: 'team_id', title: 'company_name',
     defaultSort: 'created_at DESC',
     fields: [
       { name: 'company_name', label: 'Бізнес', type: 'text', required: true, list: true },
