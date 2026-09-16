@@ -6,6 +6,7 @@ import { credentialActions } from './vault.js';
 import { openLead } from './prospecting.js';
 import { scriptStepsModal } from './scripts.js';
 import { clientCardModal } from './clients.js';
+import { servicePackageModal } from './servicePackage.js';
 import { icon, withIcon } from '../icons.js';
 
 const PAGE = 50;
@@ -168,6 +169,10 @@ export async function renderEntity(entKey) {
             class: 'btn small icon-only', style: 'margin-left:6px', title: 'Картка клієнта',
             onclick: () => clientCardModal(row.id, load),
           }, icon('award', 15)) : null,
+          entKey === 'services' ? el('button', {
+            class: 'btn small icon-only', style: 'margin-left:6px', title: 'Пакет: зібрати з інших послуг',
+            onclick: () => servicePackageModal(row.id, load),
+          }, icon('layers', 15)) : null,
           entKey === 'users' && state.caps.settings && row.status === 'active' ? el('button', {
             class: 'btn small danger icon-only', style: 'margin-left:6px', title: 'Офбординг',
             onclick: async () => {

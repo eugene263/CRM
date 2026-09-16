@@ -176,6 +176,21 @@ const hooks = {
       return data;
     },
   },
+  services: {
+    async beforeWrite(user, data, body, { isCreate, current }) {
+      // Ціна пакета рахується сумою вкладених послуг (costing.js) — ручний
+      // ввід через форму чи інлайн-редагування її не змінює.
+      if (!isCreate && current?.is_package && 'price' in data) delete data.price;
+      return data;
+    },
+    async afterWrite(user, id, data, { isCreate, current }) {
+      // Ціна цієї послуги змінилась — перерахувати всі пакети, куди вона
+      // вкладена компонентом, як і при зміні ставки в собівартості.
+      if (!isCreate && data.price != null && Number(data.price) !== Number(current?.price)) {
+        await costing.recomputePackagesUsingComponent(id);
+      }
+    },
+  },
 };
 
 // ── Список із фільтрами ───────────────────────────────────────────────────
@@ -385,6 +400,7 @@ export async function handleApi(req, res, url) {
     if (seg[1] === 'services' && seg[2]) {
       const serviceId = Number(seg[2]);
       if (req.method === 'GET' && !seg[3]) return ok(res, await costing.serviceCost(serviceId));
+      if (seg[3] === 'package' && !seg[4] && req.method === 'GET') return ok(res, await costing.packageCard(serviceId));
       if (!canEdit) return fail(res, 403, 'Немає прав редагувати собівартість');
       if (seg[3] === 'items' && req.method === 'POST') {
         return ok(res, await costing.saveItem(serviceId, await readBody(req)));
@@ -394,6 +410,17 @@ export async function handleApi(req, res, url) {
       }
       if (seg[3] === 'apply-price' && req.method === 'POST') {
         return ok(res, await costing.applyRecommendedPrice(serviceId));
+      }
+      if (seg[3] === 'package' && seg[4] === 'items' && !seg[5] && req.method === 'POST') {
+        const body = await readBody(req);
+        return ok(res, await costing.addPackageItem(serviceId, Number(body.component_service_id), body.quantity));
+      }
+      if (seg[3] === 'package' && seg[4] === 'items' && seg[5] && req.method === 'PUT') {
+        const body = await readBody(req);
+        return ok(res, await costing.updatePackageItem(serviceId, Number(seg[5]), body.quantity));
+      }
+      if (seg[3] === 'package' && seg[4] === 'items' && seg[5] && req.method === 'DELETE') {
+        return ok(res, await costing.removePackageItem(serviceId, Number(seg[5])));
       }
     }
     return fail(res, 404, 'Немає такого ендпоїнта');
@@ -760,6 +787,9 @@ export async function handleApi(req, res, url) {
     if (!can(user, entKey, 'delete')) return fail(res, 403, 'Немає прав на видалення');
     const current = await get(`SELECT * FROM ${ent.table} WHERE id=?`, id);
     if (!current || !ownsRow(user, entKey, current)) return fail(res, 404, 'Запис не знайдено');
+    if (entKey === 'services' && await get('SELECT id FROM service_package_items WHERE component_service_id=?', id)) {
+      return fail(res, 409, 'Послуга входить у пакет — спершу приберіть її звідти');
+    }
     await remove(ent.table, id);
     await audit({ user_id: user.id, action: 'delete', entity: entKey, entity_id: id, payload: redact(ent, current), ip });
     return ok(res, { ok: true });

@@ -28,6 +28,15 @@ const migrations = [
       if (!cols.has('script_id')) await run('ALTER TABLE touches ADD COLUMN script_id INTEGER');
     },
   },
+  {
+    // service_package_items — нова таблиця, її створює сам schema.sql; а от
+    // is_package у наявній services треба докотити ALTER'ом.
+    id: '2026-09-18-services-is-package',
+    async up() {
+      const cols = await columnsOf('services');
+      if (!cols.has('is_package')) await run('ALTER TABLE services ADD COLUMN is_package INTEGER NOT NULL DEFAULT 0');
+    },
+  },
 ];
 
 export async function migrate() {

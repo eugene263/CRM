@@ -218,3 +218,66 @@ export async function applyRecommendedPrice(serviceId) {
   await update('services', serviceId, { price: calc.recommended_price, updated_at: now() });
   return serviceCost(serviceId);
 }
+
+// ── Пакети послуг ─────────────────────────────────────────────────────────
+// Пакет — та сама послуга (services.is_package=1), ціна якої не вводиться
+// вручну, а рахується сумою (ціна компонента × кількість) по вкладених
+// послугах. Компонентом може бути лише звичайна послуга — без вкладених
+// пакетів, щоб не рахувати рекурсію й не ловити цикли.
+
+export async function packageCard(packageId) {
+  const service = await get('SELECT * FROM services WHERE id=?', packageId);
+  if (!service) throw Object.assign(new Error('Послугу не знайдено'), { status: 404 });
+  const items = (await all(
+    `SELECT pi.*, s.name, s.unit, s.price
+       FROM service_package_items pi JOIN services s ON s.id = pi.component_service_id
+      WHERE pi.package_service_id=? ORDER BY s.name`, packageId))
+    .map((row) => ({ ...row, total: round(Number(row.price) * Number(row.quantity)) }));
+  return { service, items };
+}
+
+async function recomputePackagePrice(packageId) {
+  const items = await all(
+    `SELECT pi.quantity, s.price FROM service_package_items pi
+       JOIN services s ON s.id = pi.component_service_id WHERE pi.package_service_id=?`, packageId);
+  const price = round(items.reduce((sum, i) => sum + Number(i.price) * Number(i.quantity), 0));
+  await update('services', packageId, { price, is_package: items.length ? 1 : 0, updated_at: now() });
+}
+
+// Ціна компонента змінилась (руками або тим самим рекалком) — перерахувати
+// всі пакети, куди він вкладений, так само, як зміна ставки перераховує
+// собівартість послуг, де вона використана.
+export async function recomputePackagesUsingComponent(componentId) {
+  const packages = await all(
+    'SELECT DISTINCT package_service_id AS id FROM service_package_items WHERE component_service_id=?', componentId);
+  for (const p of packages) await recomputePackagePrice(p.id);
+}
+
+export async function addPackageItem(packageId, componentId, quantity) {
+  if (componentId === packageId) throw Object.assign(new Error('Послуга не може входити сама в себе'), { status: 400 });
+  const component = await get('SELECT * FROM services WHERE id=?', componentId);
+  if (!component) throw Object.assign(new Error('Послугу-компонент не знайдено'), { status: 400 });
+  if (component.is_package) throw Object.assign(new Error('Пакет не можна вкладати в інший пакет'), { status: 400 });
+  if (await get('SELECT id FROM service_package_items WHERE package_service_id=? AND component_service_id=?', packageId, componentId)) {
+    throw Object.assign(new Error('Ця послуга вже в пакеті — зміните кількість замість повторного додавання'), { status: 400 });
+  }
+  const qty = Number(quantity || 1);
+  if (!(qty > 0)) throw Object.assign(new Error('Кількість має бути більшою за нуль'), { status: 400 });
+  await insert('service_package_items', { package_service_id: packageId, component_service_id: componentId, quantity: qty });
+  await recomputePackagePrice(packageId);
+  return packageCard(packageId);
+}
+
+export async function updatePackageItem(packageId, itemId, quantity) {
+  const qty = Number(quantity || 0);
+  if (!(qty > 0)) throw Object.assign(new Error('Кількість має бути більшою за нуль'), { status: 400 });
+  await run('UPDATE service_package_items SET quantity=? WHERE id=? AND package_service_id=?', qty, itemId, packageId);
+  await recomputePackagePrice(packageId);
+  return packageCard(packageId);
+}
+
+export async function removePackageItem(packageId, itemId) {
+  await run('DELETE FROM service_package_items WHERE id=? AND package_service_id=?', itemId, packageId);
+  await recomputePackagePrice(packageId);
+  return packageCard(packageId);
+}

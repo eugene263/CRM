@@ -819,10 +819,11 @@ CREATE TABLE IF NOT EXISTS services (
   unit TEXT NOT NULL DEFAULT 'шт',         -- ролик|пакет|місяць|шт
   description TEXT,
   target_margin REAL NOT NULL DEFAULT 50,  -- цільова маржа, %
-  price REAL NOT NULL DEFAULT 0,           -- фактична ціна продажу
+  price REAL NOT NULL DEFAULT 0,           -- фактична ціна продажу; для пакета — сума цін вкладених послуг
   currency TEXT NOT NULL DEFAULT 'USD',
   volume_per_month REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',   -- active|draft|archived
+  is_package INTEGER NOT NULL DEFAULT 0,   -- 1 = ціна рахується з вкладених послуг, а не вводиться руками
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -839,6 +840,19 @@ CREATE TABLE IF NOT EXISTS service_cost_items (
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_cost_items ON service_cost_items(service_id);
+
+-- Пакет = послуга (services.is_package=1) + перелік вкладених послуг тут.
+-- Компонентом може бути лише звичайна послуга (не інший пакет) — так
+-- вкладеність не заходить у цикли й не потребує рекурсивного рахунку.
+CREATE TABLE IF NOT EXISTS service_package_items (
+  id INTEGER PRIMARY KEY,
+  package_service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+  component_service_id INTEGER NOT NULL REFERENCES services(id),
+  quantity REAL NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_package_items ON service_package_items(package_service_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_package_component ON service_package_items(package_service_id, component_service_id);
 
 -- ── Клієнти ────────────────────────────────────────────────────────────────
 -- Лід виграно → клієнт створюється сам (setStatus у prospecting.js реагує на

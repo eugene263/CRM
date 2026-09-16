@@ -755,6 +755,80 @@ test('крієйтор не бачить собівартості, фінанс�
   assert.equal((await call('/api/costing/services', { as: 'finance' })).status, 200);
 });
 
+// ── Пакети послуг ────────────────────────────────────────────────────────
+
+async function createService(name, price) {
+  const res = await call('/api/services', { method: 'POST', body: { name, price } });
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  return res.data.row;
+}
+
+test('пакет: ціна рахується сумою вкладених послуг, тип автоматично стає «пакет»', async () => {
+  const a = await createService('Компонент А', 100);
+  const b = await createService('Компонент Б', 50);
+  const pack = await createService('Пакет тест 1', 999);
+
+  const added1 = await call(`/api/costing/services/${pack.id}/package/items`, { method: 'POST', body: { component_service_id: a.id, quantity: 2 } });
+  assert.equal(added1.status, 200, JSON.stringify(added1.data));
+  assert.equal(Number(added1.data.service.is_package), 1);
+  assert.equal(Number(added1.data.service.price), 200, '2 × 100');
+
+  const added2 = await call(`/api/costing/services/${pack.id}/package/items`, { method: 'POST', body: { component_service_id: b.id, quantity: 1 } });
+  assert.equal(Number(added2.data.service.price), 250, '2×100 + 1×50 = 250');
+  assert.equal(added2.data.items.length, 2);
+});
+
+test('зміна ціни компонента перераховує всі пакети, куди він вкладений', async () => {
+  const a = await createService('Компонент для рекалку', 10);
+  const pack = await createService('Пакет тест 2', 0);
+  await call(`/api/costing/services/${pack.id}/package/items`, { method: 'POST', body: { component_service_id: a.id, quantity: 3 } });
+
+  await call(`/api/services/${a.id}`, { method: 'PUT', body: { price: 20 } });
+  const card = await call(`/api/costing/services/${pack.id}/package`);
+  assert.equal(Number(card.data.service.price), 60, '3 × 20 після зміни ціни компонента');
+});
+
+test('пакет не можна вкласти в інший пакет', async () => {
+  const a = await createService('Компонент для вкладеного пакету', 10);
+  const inner = await createService('Внутрішній пакет', 0);
+  await call(`/api/costing/services/${inner.id}/package/items`, { method: 'POST', body: { component_service_id: a.id, quantity: 1 } });
+
+  const outer = await createService('Зовнішній пакет', 0);
+  const res = await call(`/api/costing/services/${outer.id}/package/items`, { method: 'POST', body: { component_service_id: inner.id, quantity: 1 } });
+  assert.equal(res.status, 400);
+});
+
+test('послугу, яка входить у пакет, не можна видалити', async () => {
+  const a = await createService('Захищений компонент', 5);
+  const pack = await createService('Пакет-власник', 0);
+  await call(`/api/costing/services/${pack.id}/package/items`, { method: 'POST', body: { component_service_id: a.id, quantity: 1 } });
+
+  const del = await call(`/api/services/${a.id}`, { method: 'DELETE' });
+  assert.equal(del.status, 409);
+});
+
+test('прибрати останній компонент — пакет повертається до звичайної послуги з нульовою ціною', async () => {
+  const a = await createService('Одинокий компонент', 40);
+  const pack = await createService('Пакет тест 3', 0);
+  const added = await call(`/api/costing/services/${pack.id}/package/items`, { method: 'POST', body: { component_service_id: a.id, quantity: 1 } });
+  const itemId = added.data.items[0].id;
+
+  const removed = await call(`/api/costing/services/${pack.id}/package/items/${itemId}`, { method: 'DELETE' });
+  assert.equal(removed.status, 200);
+  assert.equal(Number(removed.data.service.is_package), 0);
+  assert.equal(Number(removed.data.service.price), 0);
+});
+
+test('ручне редагування ціни пакета ігнорується — вона лишається розрахунковою', async () => {
+  const a = await createService('Компонент для ручного тесту', 30);
+  const pack = await createService('Пакет тест 4', 0);
+  await call(`/api/costing/services/${pack.id}/package/items`, { method: 'POST', body: { component_service_id: a.id, quantity: 2 } });
+
+  const manual = await call(`/api/services/${pack.id}`, { method: 'PUT', body: { price: 9999 } });
+  assert.equal(manual.status, 200);
+  assert.equal(Number(manual.data.row.price), 60, 'ручний ввід ціни пакета не застосувався');
+});
+
 // ── Шаблони скриптів ─────────────────────────────────────────────────────
 
 test('демо-скрипти сідяться з кроками й запереченнями', async () => {
