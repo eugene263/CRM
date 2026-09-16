@@ -525,3 +525,162 @@ test('менеджер з пошуку бачить лише своїх ліді
   assert.equal(own.status, 200);
   assert.equal((await call('/api/leads?limit=100', { as: 'sales' })).data.total, 1);
 });
+
+// ── Плани та норми ───────────────────────────────────────────────────────
+
+test('калькулятор розкладає ціль по клієнтах на денні норми', async () => {
+  const res = await call('/api/kpi/calculator', {
+    method: 'POST',
+    body: {
+      goal_deals: 4, conv_meeting_to_deal: 20, conv_reply_to_meeting: 30,
+      reply_rate: 8, touches_per_lead: 2.5, qualification_rate: 70, working_days: 21, headcount: 1,
+    },
+  });
+  assert.equal(res.status, 200);
+  // 4 клієнти → 20 зустрічей → 67 відповідей → ~840 опрацьованих лідів
+  assert.equal(res.data.month.meetings, 20);
+  assert.equal(res.data.month.replies, 67);
+  assert.ok(res.data.month.touched_leads >= 830 && res.data.month.touched_leads <= 845);
+  assert.ok(res.data.month.touches >= 2080 && res.data.month.touches <= 2110);
+  assert.ok(res.data.daily.touches >= 99 && res.data.daily.touches <= 101);
+  assert.ok(res.data.accounts_needed >= 2, 'нагадує, що 100 тачів = кілька акаунтів');
+});
+
+test('калькулятор ділить норму на людей і не вигадує коефіцієнти', async () => {
+  const solo = await call('/api/kpi/calculator?goal_deals=4&headcount=1');
+  const duo = await call('/api/kpi/calculator?goal_deals=4&headcount=2');
+  assert.ok(duo.data.daily.touches < solo.data.daily.touches);
+  assert.equal(solo.data.real.enough, false, 'поки мало історії — чесно каже, що це орієнтири');
+});
+
+test('у план іде валідний лід, а не порожня картка', async () => {
+  const me = (await call('/api/auth/me')).data.user;
+  const today = new Date().toISOString().slice(0, 10);
+
+  await createLead({ company_name: 'Повна картка', website: 'https://full-card.example', source: baseSource });
+  await createLead({ company_name: 'Порожня картка без контактів', source: baseSource });
+
+  const facts = await call('/api/kpi/recompute', { method: 'POST', body: { user_id: me.id, date: today } });
+  assert.equal(facts.status, 200);
+  assert.ok(facts.data.leads_found.value >= 2);
+  assert.ok(facts.data.leads_found.valid < facts.data.leads_found.value, 'неповна картка не зараховується');
+});
+
+test('дискваліфікований як брак знімається з плану заднім числом', async () => {
+  const me = (await call('/api/auth/me')).data.user;
+  const today = new Date().toISOString().slice(0, 10);
+  const lead = await createLead({ company_name: 'Брак гео', website: 'https://brak-geo.example', source: baseSource });
+
+  const before = (await call('/api/kpi/recompute', { method: 'POST', body: { user_id: me.id, date: today } })).data;
+  await call(`/api/prospecting/leads/${lead.data.id}/status`, {
+    method: 'POST', body: { status_code: 'disqualified', disqualify_reason: 'wrong_geo' },
+  });
+  const after = (await call('/api/kpi/recompute', { method: 'POST', body: { user_id: me.id, date: today } })).data;
+
+  assert.equal(after.leads_found.valid, before.leads_found.valid - 1);
+  assert.ok(after.brak_rate.value > 0, 'показник браку росте');
+});
+
+test('норма множиться на рампап і завантаженість дня', async () => {
+  const me = (await call('/api/auth/me')).data.user;
+  const today = new Date().toISOString().slice(0, 10);
+  await call('/api/kpi_plans', {
+    method: 'POST',
+    body: { user_id: me.id, metric_code: 'touches', period_type: 'day', period_start: '2020-01-01', target_value: 100 },
+  });
+
+  const full = await call('/api/kpi/my-day');
+  const touches = full.data.progress.find((p) => p.metric === 'touches');
+  assert.ok(touches, 'норма підтягнулась');
+
+  await call('/api/work_calendar', {
+    method: 'POST', body: { user_id: me.id, date: today, kind: 'sick', capacity_percent: 0 },
+  });
+  const sick = await call('/api/kpi/my-day');
+  const sickTouches = sick.data.progress.find((p) => p.metric === 'touches');
+  assert.equal(sickTouches.target, 0, 'лікарняний не перетворюється на невиконану норму');
+  assert.equal(sick.data.calendar_kind, 'sick');
+});
+
+test('ліміт акаунта зупиняє тач до підтвердження', async () => {
+  await call('/api/channel_limits', {
+    method: 'POST', body: { account_name: 'ig_limit_test', channel: 'instagram_dm', daily_limit: 1, is_active: 1 },
+  });
+  const a = await createLead({ company_name: 'Ліміт А', website: 'https://limit-a.example', source: baseSource });
+  const b = await createLead({ company_name: 'Ліміт Б', website: 'https://limit-b.example', source: baseSource });
+
+  const first = await call(`/api/prospecting/leads/${a.data.id}/touch`, {
+    method: 'POST', body: { channel: 'instagram_dm', from_account: 'ig_limit_test', message_text: 'перший' },
+  });
+  assert.equal(first.status, 200);
+
+  const second = await call(`/api/prospecting/leads/${b.data.id}/touch`, {
+    method: 'POST', body: { channel: 'instagram_dm', from_account: 'ig_limit_test', message_text: 'другий' },
+  });
+  assert.equal(second.status, 429);
+  assert.match(second.data.error, /Ліміт акаунта/);
+
+  const forced = await call(`/api/prospecting/leads/${b.data.id}/touch?force=1`, {
+    method: 'POST', body: { channel: 'instagram_dm', from_account: 'ig_limit_test', message_text: 'другий' },
+  });
+  assert.equal(forced.status, 200, 'свідоме перевищення можливе, але лишає слід');
+});
+
+test('план застосовується на команду денними й місячними нормами', async () => {
+  const salesUser = (await call('/api/users?email=sales@gennect.local')).data.rows[0];
+  const calc = (await call('/api/kpi/calculator?goal_deals=2&working_days=20')).data;
+  const res = await call('/api/kpi/apply', {
+    method: 'POST', body: { calculation: calc, user_ids: [salesUser.id], period_start: '2026-09-01' },
+  });
+  assert.equal(res.status, 200);
+  assert.ok(res.data.applied >= 8, 'денні й місячні плани по кожній метриці');
+
+  const plans = await call(`/api/kpi_plans?user_id=${salesUser.id}&limit=50`);
+  assert.ok(plans.data.rows.some((p) => p.period_type === 'day'));
+  assert.ok(plans.data.rows.some((p) => p.period_type === 'month'));
+});
+
+test('менеджер бачить свою норму, але не ставить її і не бачить команду', async () => {
+  const mine = await call('/api/kpi/my-day', { as: 'sales' });
+  assert.equal(mine.status, 200);
+  assert.ok(Array.isArray(mine.data.progress));
+
+  assert.equal((await call('/api/kpi/team', { as: 'sales' })).status, 403);
+  const write = await call('/api/kpi_plans', {
+    method: 'POST', as: 'sales',
+    body: { user_id: 1, metric_code: 'touches', period_type: 'day', period_start: '2026-09-01', target_value: 5 },
+  });
+  assert.equal(write.status, 403, 'свою норму менеджер не переписує');
+});
+
+test('екран команди показує факт, брак і застояні ліди', async () => {
+  const team = await call('/api/kpi/team');
+  assert.equal(team.status, 200);
+  const sales = team.data.rows.find((r) => r.role === 'sales');
+  assert.ok(sales, 'менеджер у зведенні є');
+  assert.ok('brak_rate' in sales && 'stale_leads' in sales);
+});
+
+test('бонус за норму не виплачується при перевищенні браку', async () => {
+  const salesUser = (await call('/api/users?email=sales@gennect.local')).data.rows[0];
+  const period = new Date().toISOString().slice(0, 7);
+
+  await call('/api/bonus_rules', {
+    method: 'POST',
+    body: {
+      role: 'sales', metric_code: 'touches', threshold_percent: 70,
+      bonus_coefficient: 1, base_amount: 300, quality_gate_percent: 15, is_active: 1,
+    },
+  });
+  await call('/api/kpi_plans', {
+    method: 'POST',
+    body: { user_id: salesUser.id, metric_code: 'touches', period_type: 'month', period_start: `${period}-01`, target_value: 1 },
+  });
+  await call('/api/salary_rules', { method: 'POST', body: { user_id: salesUser.id, fix_amount: 500, percent_of_profit: 0, active_from: '2020-01-01' } });
+
+  const salary = await call(`/api/finance/salary?period=${period}`);
+  const row = salary.data.rows.find((r) => r.user_id === salesUser.id);
+  assert.ok(row, 'менеджер потрапляє в розрахунок ЗП');
+  assert.ok(row.kpi_bonus, 'бонус за нормою рахується окремим блоком');
+  assert.equal(row.total, row.fix_amount + row.percent_amount + row.bonus_amount);
+});

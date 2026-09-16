@@ -8,6 +8,7 @@ import {
 } from './rbac.js';
 import * as vault from './vault.js';
 import * as prospecting from './prospecting.js';
+import * as kpi from './kpi.js';
 import { encrypt, decrypt, token, hashIp } from './crypto.js';
 import { hashPassword } from './crypto.js';
 import * as auth from './auth.js';
@@ -363,6 +364,36 @@ export async function handleApi(req, res, url) {
     return ok(res, result);
   }
 
+  // --- плани та норми ---
+  if (seg[0] === 'kpi') {
+    if (seg[1] === 'my-day') return ok(res, await kpi.myDay(user, query.date));
+    if (seg[1] === 'month') return ok(res, { rows: await kpi.monthProgress(user.id, query.period) });
+    if (seg[1] === 'limits') return ok(res, { rows: await kpi.channelUsage(user, query.date) });
+    if (seg[1] === 'coefficients') return ok(res, await kpi.realCoefficients());
+    if (seg[1] === 'calculator') {
+      const input = req.method === 'POST' ? await readBody(req) : query;
+      return ok(res, { ...kpi.calculatePlan(input), real: await kpi.realCoefficients() });
+    }
+    if (seg[1] === 'team') {
+      if (!can(user, 'kpi_plans', 'read') || scopeOf(user, 'kpi_plans') === 'own') {
+        return fail(res, 403, 'Екран команди доступний тімліду й вище');
+      }
+      return ok(res, await kpi.teamOverview(user, query.date));
+    }
+    if (seg[1] === 'apply' && req.method === 'POST') {
+      if (!can(user, 'kpi_plans', 'create')) return fail(res, 403, 'Немає прав ставити плани');
+      const body = await readBody(req);
+      return ok(res, await kpi.applyPlan(user, body));
+    }
+    if (seg[1] === 'recompute' && req.method === 'POST') {
+      const body = await readBody(req);
+      const target = Number(body.user_id) || user.id;
+      if (target !== user.id && scopeOf(user, 'kpi_plans') === 'own') return fail(res, 403, 'Немає доступу');
+      return ok(res, await kpi.computeFacts(target, body.date));
+    }
+    return fail(res, 404, 'Немає такого ендпоїнта');
+  }
+
   // --- пошук клієнтів ---
   if (seg[0] === 'prospecting') {
     if (!can(user, 'leads', 'read')) return fail(res, 403, 'Немає доступу до модуля пошуку');
@@ -416,7 +447,9 @@ export async function handleApi(req, res, url) {
         try {
           return ok(res, await prospecting.logTouch(user, leadId, body, { force }));
         } catch (e) {
-          if (e.needForce) return fail(res, 409, e.message, { needForce: true });
+          // needForce приходить і від захисту від подвійного дотику (409),
+          // і від ліміту акаунта (429) — статус беремо з самої помилки.
+          if (e.needForce) return fail(res, e.status || 409, e.message, { needForce: true });
           throw e;
         }
       }

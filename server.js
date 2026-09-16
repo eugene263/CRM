@@ -15,6 +15,7 @@ import { migrate } from './src/migrate.js';
 import { seedRoles, syncNewEntities, syncNewRoles } from './src/rbac.js';
 import { expireOverdue } from './src/vault.js';
 import { seedProspecting, prospectingChecks } from './src/prospecting.js';
+import { seedKpi, kpiChecks } from './src/kpi.js';
 import { backupDatabase } from './src/backup.js';
 import { captureError, installGlobalHandlers } from './src/errors.js';
 
@@ -88,6 +89,7 @@ await seedRoles();
 await syncNewRoles();
 await syncNewEntities();
 await seedProspecting();
+await seedKpi();
 await bootstrapOwner();
 
 if (ROLE !== 'postback') {
@@ -110,6 +112,7 @@ const tick = async () => {
     await runChecks();
     await expireOverdue();       // протерміновані видачі доступів
     await prospectingChecks();   // розморозка «не зараз», застій у лідах
+    await kpiChecks();           // ранковий план, пінг о 14:00, підсумок дня
     await backupDatabase();      // добова копія бази поруч із самою базою на томі
     await flushQueue();
   } catch (e) { await captureError(e, { logger: 'worker' }); }

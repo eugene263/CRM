@@ -1,5 +1,6 @@
 // Фінанси: формула ЗП (фікс + % від профіту + бонус за KPI) та P&L.
 import { all, get, run, insert, audit } from './db.js';
+import { bonusFor } from './kpi.js';
 
 const bounds = (period) => {
   const from = `${period}-01`;
@@ -76,11 +77,14 @@ export async function calcSalary(period, { commit = false, actorId = null } = {}
       const fact = { posts: stats.posts, deps: stats.deps, profit: stats.profit }[rule.bonus_metric] ?? 0;
       if (fact >= Number(rule.bonus_target)) bonus = Number(rule.bonus_amount || 0);
     }
+    // Бонус за виконання норм пошуку — ступінчастий, із гейтом за браком.
+    const kpi = await bonusFor(u, period);
+    bonus += Number(kpi.amount || 0);
     const total = Math.round((fix + percent + bonus) * 100) / 100;
     const row = {
       user_id: u.id, user: u.name, role: u.role, period,
       fix_amount: fix, percent_amount: Math.round(percent * 100) / 100, bonus_amount: bonus, total,
-      rule_id: rule.id, ...stats,
+      rule_id: rule.id, kpi_bonus: kpi, ...stats,
     };
     rows.push(row);
 

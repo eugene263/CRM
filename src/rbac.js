@@ -19,6 +19,9 @@ const PROSPECTING_SELF = {
   prospect_lists: R('write', 'team'), leads: R('full', 'own'), touches: R('read', 'own'),
   message_templates: R('read', 'all'), lead_statuses: R('read', 'all'), dictionaries: R('read', 'all'),
   suppression_list: R('write', 'all'),
+  // Свою норму менеджер бачить, але не редагує — інакше план втрачає сенс.
+  kpi_plans: R('read', 'own'), channel_limits: R('read', 'own'), work_calendar: R('read', 'own'),
+  ramp_up_plans: R('read', 'own'), bonus_rules: R('read', 'own'), quality_flags: R('read', 'own'),
 };
 const CONTENT = ['creatives', 'creative_versions', 'tasks'];
 const MONEY = ['expenses', 'payouts', 'salary_rules', 'partners', 'offers', 'offer_rates_history'];
@@ -37,6 +40,8 @@ export const defaultMatrix = {
     prospect_lists: R('full', 'team'), leads: R('full', 'team'), touches: R('read', 'team'),
     message_templates: R('full', 'all'), lead_statuses: R('write', 'all'), dictionaries: R('write', 'all'),
     suppression_list: R('full', 'all'),
+    kpi_plans: R('full', 'team'), channel_limits: R('full', 'all'), work_calendar: R('full', 'team'),
+    ramp_up_plans: R('full', 'team'), bonus_rules: R('read', 'all'), quality_flags: R('read', 'team'),
     credentials: R('write', 'team'),
     credential_grants: R('read', 'team'),
     access_requests: R('full', 'team'),

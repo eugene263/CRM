@@ -303,6 +303,29 @@ async function seedDemo() {
     variables: 'company, city', created_by: salesUser.id,
   });
 
+  // Норми: денний і місячний план менеджера, ліміти акаунтів, рампап.
+  const monthStart = `${new Date().toISOString().slice(0, 7)}-01`;
+  for (const [metric, daily] of [['leads_found', 40], ['leads_qualified', 28], ['touches', 60], ['replies', 3]]) {
+    await insert('kpi_plans', {
+      user_id: salesUser.id, metric_code: metric, period_type: 'day',
+      period_start: monthStart, target_value: daily,
+    });
+    await insert('kpi_plans', {
+      user_id: salesUser.id, metric_code: metric, period_type: 'month',
+      period_start: monthStart, target_value: daily * 21,
+    });
+  }
+  for (const [account, channel, limit, stage] of [
+    ['ig_sales_1', 'instagram_dm', 40, 'ready'],
+    ['ig_sales_2', 'instagram_dm', 15, 'warming'],
+    ['hello@gennect.io', 'email', 50, 'ready'],
+  ]) {
+    await insert('channel_limits', { account_name: account, channel, daily_limit: limit, warmup_stage: stage, user_id: salesUser.id });
+  }
+  for (const [week, percent] of [[1, 30], [2, 50], [3, 70], [4, 85], [5, 100]]) {
+    await insert('ramp_up_plans', { role: 'sales', week_number: week, target_percent: percent });
+  }
+
   console.log(`Демо-дані: ${accounts.length} акаунтів, ${posts} публікацій, ${(await all('SELECT id FROM conversions')).length} конверсій.`);
   console.log('Демо-логіни: head@gennect.local / lead.a@gennect.local / creator1@gennect.local … пароль demo1234');
 }

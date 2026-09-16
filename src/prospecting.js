@@ -2,6 +2,7 @@
 // дедуплікація, захист від подвійного дотику й черга на сьогодні.
 import { all, get, run, insert, update, audit } from './db.js';
 import { notify } from './telegram.js';
+import { checkChannelLimit } from './kpi.js';
 
 const now = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 const today = () => new Date().toISOString().slice(0, 10);
@@ -219,6 +220,12 @@ export async function logTouch(user, leadId, payload, { force = false } = {}) {
         { status: 409, needForce: true },
       );
     }
+  }
+
+  // Ліміт ріже платформа, а не менеджер: попереджаємо до відправки.
+  if (payload.direction !== 'in' && !force) {
+    const limit = await checkChannelLimit(payload.from_account, payload.channel);
+    if (!limit.ok) throw Object.assign(new Error(limit.message), { status: 429, needForce: true });
   }
 
   const prev = Number((await get(

@@ -277,8 +277,21 @@ export async function renderProspecting() {
     el('td', {}, String(lead.next_contact_at || '—').slice(0, 16)),
     el('td', { class: 'muted' }, extra || lead.geo_city || ''));
 
+  function progressBar(item) {
+    const percent = item.percent ?? 0;
+    const color = percent >= 100 ? 'var(--accent-2)' : percent >= 70 ? 'var(--accent)' : 'var(--warn)';
+    return el('div', { style: 'margin-bottom:10px' },
+      el('div', { style: 'display:flex;justify-content:space-between;font-size:13px' },
+        el('span', {}, item.name),
+        el('span', { class: 'muted' }, `${num(item.fact)} / ${num(item.target)}${item.rejected ? ` · брак ${num(item.rejected)}` : ''}`)),
+      el('div', { style: 'height:6px;background:var(--panel-2);border-radius:4px;overflow:hidden;margin-top:3px' },
+        el('div', { style: `height:100%;width:${Math.min(100, percent)}%;background:${color}` })));
+  }
+
   async function renderQueue() {
     const q = await api.get('/prospecting/queue');
+    let day = null;
+    try { day = await api.get('/kpi/my-day'); } catch { day = null; }
     const table = (rows, empty, extra) => rows.length
       ? el('div', { class: 'table-wrap' }, el('table', {},
         el('thead', {}, el('tr', {}, el('th', {}, 'Бізнес'), el('th', {}, 'Статус'), el('th', {}, ''),
@@ -287,6 +300,13 @@ export async function renderProspecting() {
       : el('div', { class: 'muted' }, empty);
 
     body.textContent = '';
+    if (day?.progress?.length) {
+      body.append(el('div', { class: 'card' },
+        el('h3', {}, `Норма на сьогодні${day.capacity < 1 ? ` · ${day.calendar_kind}, ${Math.round(day.capacity * 100)}% дня` : ''}${day.ramp < 1 ? ` · рампап ${Math.round(day.ramp * 100)}%` : ''}`),
+        ...day.progress.map(progressBar),
+        day.limits?.length ? el('div', { class: 'muted', style: 'font-size:12px;margin-top:6px' },
+          'Ліміти: ' + day.limits.map((l) => `${l.account_name} ${l.used_today}/${l.daily_limit}`).join(' · ')) : null));
+    }
     body.append(
       el('div', { class: 'tiles' },
         el('div', { class: 'tile' }, el('div', { class: 'label' }, 'Прострочені фолоу-апи'),

@@ -657,3 +657,115 @@ CREATE TABLE IF NOT EXISTS suppression_list (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_suppression ON suppression_list(kind, value);
+
+-- ── Плани та норми ────────────────────────────────────────────────────────
+-- Норма не вписується зі стелі: вона рахується зворотно від цілі по клієнтах
+-- і множиться на рампап новачка та завантаженість дня з календаря.
+CREATE TABLE IF NOT EXISTS kpi_metrics (
+  id INTEGER PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,               -- leads_found|leads_qualified|touches|...
+  name TEXT NOT NULL,
+  unit TEXT,
+  kind TEXT NOT NULL DEFAULT 'leading',    -- leading|lagging|quality
+  direction TEXT NOT NULL DEFAULT 'more',  -- more|less
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS kpi_plans (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id),
+  team_id INTEGER REFERENCES teams(id),
+  role TEXT,
+  metric_code TEXT NOT NULL,
+  period_type TEXT NOT NULL DEFAULT 'day', -- day|week|month|quarter
+  period_start TEXT NOT NULL,
+  period_end TEXT,
+  target_value REAL NOT NULL DEFAULT 0,
+  min_threshold REAL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_kpi_plans ON kpi_plans(user_id, metric_code, period_type);
+
+CREATE TABLE IF NOT EXISTS kpi_facts (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  metric_code TEXT NOT NULL,
+  date TEXT NOT NULL,
+  value REAL NOT NULL DEFAULT 0,
+  valid_value REAL NOT NULL DEFAULT 0,
+  rejected_value REAL NOT NULL DEFAULT 0,
+  calculated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_kpi_fact ON kpi_facts(user_id, metric_code, date);
+
+CREATE TABLE IF NOT EXISTS plan_calculator (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  goal_deals REAL NOT NULL DEFAULT 4,
+  conv_meeting_to_deal REAL NOT NULL DEFAULT 20,
+  conv_reply_to_meeting REAL NOT NULL DEFAULT 30,
+  reply_rate REAL NOT NULL DEFAULT 8,
+  touches_per_lead REAL NOT NULL DEFAULT 2.5,
+  qualification_rate REAL NOT NULL DEFAULT 70,
+  working_days INTEGER NOT NULL DEFAULT 21,
+  headcount REAL NOT NULL DEFAULT 1,
+  team_id INTEGER REFERENCES teams(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS work_calendar (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id),
+  date TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'work',       -- work|weekend|holiday|vacation|sick
+  capacity_percent INTEGER NOT NULL DEFAULT 100,
+  note TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar ON work_calendar(user_id, date);
+
+CREATE TABLE IF NOT EXISTS ramp_up_plans (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id),
+  role TEXT,
+  week_number INTEGER NOT NULL,
+  metric_code TEXT,
+  target_percent INTEGER NOT NULL DEFAULT 100,
+  started_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS quality_flags (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id),
+  lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+  flag_type TEXT NOT NULL,                 -- duplicate|incomplete|bad_qualification|blocked|bounce
+  date TEXT NOT NULL DEFAULT (date('now')),
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_quality_flags ON quality_flags(user_id, date);
+
+CREATE TABLE IF NOT EXISTS bonus_rules (
+  id INTEGER PRIMARY KEY,
+  role TEXT,
+  user_id INTEGER REFERENCES users(id),
+  metric_code TEXT NOT NULL,
+  threshold_percent REAL NOT NULL DEFAULT 100,
+  bonus_coefficient REAL NOT NULL DEFAULT 1,
+  quality_gate_percent REAL NOT NULL DEFAULT 15,
+  base_amount REAL NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS channel_limits (
+  id INTEGER PRIMARY KEY,
+  account_name TEXT NOT NULL,              -- скринька або нік, з якого пишемо
+  channel TEXT NOT NULL,
+  user_id INTEGER REFERENCES users(id),
+  daily_limit INTEGER NOT NULL DEFAULT 30,
+  warmup_stage TEXT,                       -- new|warming|ready
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_channel_account ON channel_limits(account_name, channel);

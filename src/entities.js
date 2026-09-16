@@ -443,6 +443,87 @@ export const entities = {
     ],
   },
 
+  // ── Плани та норми ─────────────────────────────────────────────────────
+  kpi_plans: {
+    label: 'Плани та норми', group: 'Плани', icon: '🎚', ownField: 'user_id', teamField: 'team_id',
+    defaultSort: 'period_start DESC',
+    fields: [
+      { name: 'user_id', label: 'Співробітник', type: 'ref', ref: 'users', list: true },
+      { name: 'role', label: 'Або роль', type: 'text', list: true, hint: 'якщо норма спільна для ролі' },
+      { name: 'metric_code', label: 'Метрика', type: 'select', required: true, list: true, options: S(
+        ['leads_found', 'Знайдено лідів'], ['leads_qualified', 'Кваліфіковано'], ['touches', 'Тачів'],
+        ['touches_followup', 'Фолоу-апів'], ['replies', 'Відповідей'], ['meetings', 'Зустрічей'], ['deals', 'Клієнтів']) },
+      { name: 'period_type', label: 'Період', type: 'select', required: true, list: true, options: S(
+        ['day', 'День'], ['week', 'Тиждень'], ['month', 'Місяць'], ['quarter', 'Квартал']) },
+      { name: 'period_start', label: 'Діє з', type: 'date', required: true, list: true },
+      { name: 'period_end', label: 'Діє до', type: 'date' },
+      { name: 'target_value', label: 'Норма', type: 'number', required: true, list: true },
+      { name: 'min_threshold', label: 'Мінімум', type: 'number' },
+      { name: 'team_id', label: 'Команда', type: 'ref', ref: 'teams' },
+    ],
+  },
+  channel_limits: {
+    label: 'Ліміти акаунтів', group: 'Плани', icon: '🚦', ownField: 'user_id', title: 'account_name',
+    fields: [
+      { name: 'account_name', label: 'Акаунт / скринька', type: 'text', required: true, list: true },
+      { name: 'channel', label: 'Канал', type: 'select', required: true, list: true, options: S(
+        ['instagram_dm', 'Instagram DM'], ['telegram', 'Telegram'], ['email', 'Email'],
+        ['whatsapp', 'WhatsApp'], ['linkedin', 'LinkedIn'], ['call', 'Дзвінок']) },
+      { name: 'user_id', label: 'Чий', type: 'ref', ref: 'users', list: true },
+      { name: 'daily_limit', label: 'Ліміт/добу', type: 'number', required: true, list: true },
+      { name: 'warmup_stage', label: 'Прогрів', type: 'select', list: true, options: S(
+        ['new', 'Новий'], ['warming', 'Прогрівається'], ['ready', 'Готовий']) },
+      { name: 'is_active', label: 'Активний', type: 'number', list: true },
+    ],
+  },
+  work_calendar: {
+    label: 'Робочий календар', group: 'Плани', icon: '📅', ownField: 'user_id', defaultSort: 'date DESC',
+    fields: [
+      { name: 'user_id', label: 'Співробітник', type: 'ref', ref: 'users', required: true, list: true },
+      { name: 'date', label: 'Дата', type: 'date', required: true, list: true },
+      { name: 'kind', label: 'Тип дня', type: 'select', required: true, list: true, options: S(
+        ['work', 'Робочий'], ['weekend', 'Вихідний'], ['holiday', 'Свято'],
+        ['vacation', 'Відпустка'], ['sick', 'Лікарняний']) },
+      { name: 'capacity_percent', label: 'Завантаженість, %', type: 'number', list: true },
+      { name: 'note', label: 'Нотатка', type: 'text' },
+    ],
+  },
+  ramp_up_plans: {
+    label: 'Рампап новачків', group: 'Плани', icon: '📈', ownField: 'user_id', defaultSort: 'week_number ASC',
+    fields: [
+      { name: 'user_id', label: 'Співробітник', type: 'ref', ref: 'users', list: true },
+      { name: 'role', label: 'Або роль', type: 'text', list: true },
+      { name: 'week_number', label: 'Тиждень', type: 'number', required: true, list: true },
+      { name: 'target_percent', label: '% від норми', type: 'number', required: true, list: true },
+      { name: 'started_at', label: 'Старт', type: 'date', list: true },
+    ],
+  },
+  bonus_rules: {
+    label: 'Бонуси за норму', group: 'Плани', icon: '🏅', ownField: 'user_id',
+    defaultSort: 'threshold_percent DESC',
+    fields: [
+      { name: 'role', label: 'Роль', type: 'text', list: true },
+      { name: 'user_id', label: 'Або співробітник', type: 'ref', ref: 'users', list: true },
+      { name: 'metric_code', label: 'Метрика', type: 'text', required: true, list: true },
+      { name: 'threshold_percent', label: 'Виконання від, %', type: 'number', required: true, list: true },
+      { name: 'bonus_coefficient', label: 'Коефіцієнт', type: 'number', required: true, list: true },
+      { name: 'base_amount', label: 'База бонуса, $', type: 'money', list: true },
+      { name: 'quality_gate_percent', label: 'Гейт по браку, %', type: 'number', list: true },
+      { name: 'is_active', label: 'Активне', type: 'number' },
+    ],
+  },
+  quality_flags: {
+    label: 'Позначки браку', group: 'Плани', icon: '⚠️', ownField: 'user_id', readOnlyEntity: true,
+    defaultSort: 'created_at DESC',
+    fields: [
+      { name: 'created_at', label: 'Коли', type: 'datetime', list: true },
+      { name: 'user_id', label: 'Хто', type: 'ref', ref: 'users', list: true },
+      { name: 'lead_id', label: 'Лід', type: 'ref', ref: 'leads', list: true },
+      { name: 'flag_type', label: 'Тип', type: 'text', list: true },
+      { name: 'note', label: 'Деталі', type: 'text', list: true },
+    ],
+  },
+
   // ── Сейф доступів ──────────────────────────────────────────────────────
   credentials: {
     // «Свої» для сейфа — це видані на руки, а не створені: крієйтор має
