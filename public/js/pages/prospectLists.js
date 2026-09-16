@@ -4,8 +4,8 @@
 // (уже є як сутність), «Особи» — контакти цих лідів, зведені по людині
 // (src/prospecting.js:listContacts).
 import { api } from '../api.js';
-import { state, reloadRefs } from '../app.js';
-import { el, modal, toast, badge } from '../ui.js';
+import { state } from '../app.js';
+import { el, toast, badge } from '../ui.js';
 import { icon, withIcon } from '../icons.js';
 import { openForm } from './entity.js';
 import { openLead } from './prospecting.js';
@@ -64,7 +64,7 @@ export async function renderProspectListsCards() {
             },
           }, icon('trash', 14)) : null)));
 
-    card.addEventListener('click', () => listDetailModal(row));
+    card.addEventListener('click', () => { location.hash = `#/list/${row.id}`; });
     return card;
   }
 
@@ -79,7 +79,12 @@ export async function renderProspectListsCards() {
   return el('div', {}, toolbar, grid);
 }
 
-async function listDetailModal(list) {
+// Повноекранна сторінка списку (#/list/:id) — той самий формат, що й у
+// референсі: велика таблиця контактів на всю ширину з перемикачем
+// «Особи»/«Організації» замість модалки.
+export async function renderListDetailPage(listId) {
+  const { row: list } = await api.get(`/prospect_lists/${listId}`);
+
   const tab = { current: 'organizations' };
   const body = el('div', {});
   const orgsBtn = el('button', { class: 'btn small' }, withIcon('folder', 'Організації'));
@@ -124,9 +129,16 @@ async function listDetailModal(list) {
   peopleBtn.onclick = () => { tab.current = 'people'; syncTabs(); renderTab(); };
   syncTabs();
 
-  modal(`Список · ${list.name}`, el('div', {},
-    list.description ? el('div', { class: 'muted', style: 'margin-bottom:10px' }, list.description) : null,
-    el('div', { class: 'row', style: 'margin-bottom:12px' }, peopleBtn, orgsBtn),
-    body));
+  const header = el('div', { style: 'margin-bottom:14px' },
+    el('a', { href: '#/e/prospect_lists', style: 'font-size:12.5px;display:inline-flex;align-items:center;gap:4px' },
+      icon('chevronLeft', 13), 'Списки пошуку'),
+    el('h2', { style: 'margin:6px 0 2px' }, list.name),
+    list.description ? el('div', { class: 'muted' }, list.description) : null);
+
+  const page = el('div', {}, header,
+    el('div', { class: 'card' },
+      el('div', { class: 'row', style: 'margin-bottom:12px' }, peopleBtn, orgsBtn),
+      body));
   await renderTab();
+  return page;
 }

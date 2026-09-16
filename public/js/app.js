@@ -10,6 +10,7 @@ import { renderProfile } from './pages/profile.js';
 import { renderRoles } from './pages/roles.js';
 import { renderProspecting } from './pages/prospecting.js';
 import { renderPlans } from './pages/plans.js';
+import { renderListDetailPage } from './pages/prospectLists.js';
 
 export const state = {
   user: null, meta: {}, locked: [], refs: {}, caps: {},
@@ -181,6 +182,7 @@ async function route() {
   try {
     let node;
     if (section === 'e') node = await renderEntity(arg);
+    else if (section === 'list') node = await renderListDetailPage(Number(arg));
     else if (section === 'analytics') node = await renderAnalytics();
     else if (section === 'finance') node = await renderFinance();
     else if (section === 'profile') node = await renderProfile();
@@ -191,7 +193,7 @@ async function route() {
     view.textContent = '';
     view.append(node);
     $('#page-title').textContent = section === 'e' ? (state.meta[arg]?.label || 'Розділ')
-      : { analytics: 'Аналітика', finance: 'Фінанси', profile: 'Профіль', roles: 'Ролі та права', prospecting: 'Пошук клієнтів', plans: 'Плани та норми' }[section] || 'Дашборд';
+      : { analytics: 'Аналітика', finance: 'Фінанси', profile: 'Профіль', roles: 'Ролі та права', prospecting: 'Пошук клієнтів', plans: 'Плани та норми', list: 'Список пошуку' }[section] || 'Дашборд';
   } catch (err) {
     view.textContent = '';
     view.append(el('div', { class: 'card' }, el('div', { class: 'error' }, err.message)));
