@@ -419,6 +419,51 @@ export async function listContacts(listId, scopeSql, scopeParams) {
       ORDER BY name`, listId, ...scopeParams);
 }
 
+// AI-пошук: ШІ не має живого доступу в інтернет чи до бази бізнесів, тому
+// це не «знайти реальний бізнес», а «запропонувати гіпотези кандидатів»
+// під нішу/гео/джерело — людина перевіряє й обирає, кого справді додати
+// лідом (createLead викликає сама сторінка, тут лише список кандидатів).
+export async function aiSearchCandidates({ channel, niche, geo, count, notes }) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw Object.assign(new Error(
+      'AI-пошук не налаштовано: додайте змінну середовища ANTHROPIC_API_KEY сервісу crm на Railway'), { status: 400 });
+  }
+  const n = Math.min(Math.max(Number(count) || 10, 1), 20);
+  const channelLabel = (await get(`SELECT label FROM dictionaries WHERE kind='source_channel' AND code=?`, channel))?.label || channel || 'будь-яке';
+
+  const prompt = `Ти допомагаєш менеджеру з продажу агентства контент-маркетингу підібрати гіпотези потенційних клієнтів (лідів) для ручної перевірки.
+Джерело пошуку: ${channelLabel}
+Ніша/сфера діяльності: ${niche || 'будь-яка'}
+Гео: ${geo || 'не вказано'}
+Додаткові критерії: ${notes || 'немає'}
+
+У тебе немає живого доступу до інтернету чи актуальної бази бізнесів, тому НЕ видавай вигадані назви за перевірені реальні факти. Запропонуй ${n} правдоподібних прикладів-гіпотез бізнесу під ці критерії, чесно позначивши в полі reason кожного, що це орієнтовний приклад типу бізнесу, який вимагає ручної перевірки, а не підтверджений факт.
+
+Поверни СУВОРО валідний JSON-масив без жодного тексту навколо, формат кожного елемента: {"company_name": "...", "geo_city": "...", "reason": "..."}`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw Object.assign(new Error(`AI-пошук: помилка Anthropic API (${res.status}): ${text.slice(0, 300)}`), { status: 502 });
+  }
+  const data = await res.json();
+  const raw = (data.content || []).map((c) => c.text || '').join('');
+  let candidates;
+  try {
+    candidates = JSON.parse(raw);
+  } catch {
+    const match = raw.match(/\[[\s\S]*\]/);
+    candidates = match ? JSON.parse(match[0]) : [];
+  }
+  if (!Array.isArray(candidates)) candidates = [];
+  return candidates.slice(0, n).filter((c) => c && c.company_name);
+}
+
 // Фонове: розморозка «не зараз» і підсвічування застою.
 export async function prospectingChecks() {
   const woken = await run(

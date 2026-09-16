@@ -7,7 +7,7 @@
 // localStorage): не всім потрібне те саме поле в таблиці.
 import { api } from '../api.js';
 import { state } from '../app.js';
-import { el, toast, badge, money } from '../ui.js';
+import { el, toast, badge, money, modal } from '../ui.js';
 import { icon, withIcon } from '../icons.js';
 import { openForm } from './entity.js';
 import { openLead, addForm } from './prospecting.js';
@@ -191,6 +191,11 @@ export async function renderListDetailPage(listId) {
     onclick: () => addForm(() => renderTab(), list.id),
   }, withIcon('plus', 'Додати ліда'));
 
+  const aiSearchBtn = el('button', {
+    class: 'btn small',
+    onclick: () => aiSearchModal(list, () => renderTab()),
+  }, withIcon('search', 'Знайти лідів через AI'));
+
   const header = el('div', { style: 'margin-bottom:14px' },
     el('a', { href: '#/e/prospect_lists', style: 'font-size:12.5px;display:inline-flex;align-items:center;gap:4px' },
       icon('chevronLeft', 13), 'Списки пошуку'),
@@ -200,9 +205,101 @@ export async function renderListDetailPage(listId) {
   const toolbar = el('div', { class: 'row', style: 'margin-bottom:12px;align-items:center' },
     peopleBtn, orgsBtn,
     el('div', { style: 'flex:1 1 auto' }),
-    addLeadBtn, pickerSlot);
+    aiSearchBtn, addLeadBtn, pickerSlot);
 
   const page = el('div', {}, header, el('div', { class: 'card' }, toolbar, body));
   await renderTab();
   return page;
+}
+
+// ── AI-пошук кандидатів ─────────────────────────────────────────────────
+// Важливо чесно: ШІ тут не лазить в інтернет і не має бази бізнесів — він
+// пропонує гіпотези кандидатів під ніщу/гео/джерело зі своїх знань, а
+// людина перевіряє й обирає, кого справді додати лідом. Ключ
+// ANTHROPIC_API_KEY налаштовується на сервері (Railway); без нього
+// бекенд одразу поверне зрозумілу помилку замість тихого збою.
+async function aiSearchModal(list, onDone) {
+  const { dictionaries } = await api.get('/prospecting/dictionaries');
+  const channel = el('select', {}, ...dictionaries.filter((d) => d.kind === 'source_channel')
+    .map((d) => el('option', { value: d.code }, d.label)));
+  const niche = el('input', { value: list.vertical || '' });
+  const geo = el('input', { value: list.geo || '' });
+  const count = el('input', { type: 'number', value: 10, min: 1, max: 20 });
+  const notes = el('textarea', { rows: 2, placeholder: 'додаткові критерії (необовʼязково)' });
+
+  const form = el('div', {},
+    el('div', { class: 'muted', style: 'margin-bottom:10px;font-size:12.5px' },
+      'ШІ пропонує гіпотези кандидатів на основі власних знань — це не живий пошук в інтернеті. Перевіряйте кандидатів вручну, перш ніж з ними звʼязуватись.'),
+    el('div', { class: 'row' },
+      el('div', {}, el('label', {}, 'Джерело'), channel),
+      el('div', {}, el('label', {}, 'Кількість'), count)),
+    el('div', { class: 'row' },
+      el('div', {}, el('label', {}, 'Ніша / сфера'), niche),
+      el('div', {}, el('label', {}, 'Гео'), geo)),
+    el('div', { class: 'field' }, el('label', {}, 'Додаткові критерії'), notes));
+
+  const runBtn = el('button', { class: 'btn primary' }, 'Запустити пошук');
+  const box = modal('Пошук лідів через AI', form, [runBtn]);
+
+  runBtn.addEventListener('click', async () => {
+    runBtn.disabled = true;
+    runBtn.textContent = 'Шукаю…';
+    try {
+      const { candidates } = await api.post(`/prospecting/lists/${list.id}/ai-search`, {
+        channel: channel.value, niche: niche.value.trim(), geo: geo.value.trim(),
+        count: Number(count.value) || 10, notes: notes.value.trim(),
+      });
+      box.remove();
+      reviewCandidates(list, channel.value, candidates, onDone);
+    } catch (e) {
+      toast(e.message, true);
+      runBtn.disabled = false;
+      runBtn.textContent = 'Запустити пошук';
+    }
+  });
+}
+
+function reviewCandidates(list, channel, candidates, onDone) {
+  if (!candidates.length) return toast('ШІ не запропонував жодного кандидата — спробуйте змінити критерії', true);
+
+  const rows = candidates.map((c) => {
+    const cb = el('input', { type: 'checkbox', checked: true });
+    return {
+      cb, c,
+      node: el('tr', {},
+        el('td', {}, cb),
+        el('td', {}, c.company_name || '—'),
+        el('td', {}, c.geo_city || '—'),
+        el('td', { class: 'muted', style: 'font-size:12px' }, c.reason || '—')),
+    };
+  });
+
+  const table = el('div', { class: 'table-wrap' }, el('table', {},
+    el('thead', {}, el('tr', {}, el('th', {}, ''), el('th', {}, 'Назва'), el('th', {}, 'Гео'), el('th', {}, 'Обґрунтування ШІ'))),
+    el('tbody', {}, ...rows.map((r) => r.node))));
+
+  const createBtn = el('button', { class: 'btn primary' }, 'Створити обраних лідами');
+  const box = modal('Кандидати від AI — перевірте перед додаванням', el('div', {},
+    el('div', { class: 'muted', style: 'margin-bottom:10px;font-size:12.5px' }, 'Це орієнтовні гіпотези, не перевірені факти. Зніміть галочку з тих, кого не варто додавати.'),
+    table), [createBtn]);
+
+  createBtn.addEventListener('click', async () => {
+    const chosen = rows.filter((r) => r.cb.checked);
+    if (!chosen.length) return toast('Оберіть хоча б одного кандидата', true);
+    createBtn.disabled = true;
+    let created = 0, skipped = 0;
+    for (const r of chosen) {
+      try {
+        await api.post('/prospecting/leads', {
+          company_name: r.c.company_name, geo_city: r.c.geo_city || null, list_id: list.id,
+          note: r.c.reason ? `AI: ${r.c.reason}` : null,
+          source: { channel, method: 'ai' },
+        });
+        created += 1;
+      } catch { skipped += 1; }
+    }
+    box.remove();
+    toast(`Створено лідів: ${created}${skipped ? `, пропущено: ${skipped}` : ''}`);
+    onDone();
+  });
 }

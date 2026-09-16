@@ -494,6 +494,11 @@ export async function handleApi(req, res, url) {
       const scope = scopeWhere(user, 'leads', 'l');
       return ok(res, { rows: await prospecting.listContacts(Number(seg[2]), scope.sql, scope.params) });
     }
+    if (seg[1] === 'lists' && seg[2] && seg[3] === 'ai-search' && req.method === 'POST') {
+      if (!can(user, 'leads', 'create')) return fail(res, 403, 'Немає прав додавати лідів');
+      const body = await readBody(req);
+      return ok(res, { candidates: await prospecting.aiSearchCandidates(body) });
+    }
     if (seg[1] === 'dictionaries') {
       return ok(res, {
         statuses: await all('SELECT * FROM lead_statuses WHERE is_active=1 ORDER BY sort_order'),
