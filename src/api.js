@@ -485,6 +485,10 @@ export async function handleApi(req, res, url) {
 
     if (seg[1] === 'queue') return ok(res, await prospecting.todayQueue(user));
     if (seg[1] === 'funnel') return ok(res, await prospecting.funnel(user, query));
+    if (seg[1] === 'kanban') {
+      const scope = scopeWhere(user, 'leads', 'l');
+      return ok(res, await prospecting.kanban(scope.sql, scope.params));
+    }
     if (seg[1] === 'dictionaries') {
       return ok(res, {
         statuses: await all('SELECT * FROM lead_statuses WHERE is_active=1 ORDER BY sort_order'),

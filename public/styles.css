@@ -136,6 +136,25 @@ label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px
 .tile .value.pos { color: var(--accent-2); } .tile .value.neg { color: var(--danger); }
 .tile .hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
+/* Канбан воронки лідів */
+.kanban { display: flex; gap: 14px; align-items: flex-start; overflow-x: auto; padding-bottom: 10px; }
+.kanban-col {
+  flex: 0 0 250px; width: 250px; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px; transition: outline-color .1s;
+  outline: 2px solid transparent; outline-offset: -2px;
+}
+.kanban-col.drag-over { outline-color: var(--accent); }
+.kanban-col-head { margin-bottom: 10px; }
+.kanban-col-title { font-weight: 600; font-size: 13.5px; }
+.kanban-cards { display: flex; flex-direction: column; gap: 8px; min-height: 30px; }
+.kanban-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  padding: 10px 12px; cursor: grab; box-shadow: var(--shadow);
+}
+.kanban-card:hover { border-color: var(--accent); }
+.kanban-card.dragging { opacity: .4; }
+.kanban-card-title { font-weight: 500; font-size: 13.5px; }
+
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; cursor: pointer; }

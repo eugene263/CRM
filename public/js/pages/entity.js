@@ -7,6 +7,7 @@ import { openLead } from './prospecting.js';
 import { scriptStepsModal } from './scripts.js';
 import { clientCardModal } from './clients.js';
 import { serviceCardModal } from './servicePackage.js';
+import { renderLeadsKanban } from './leadsKanban.js';
 import { icon, withIcon } from '../icons.js';
 
 const PAGE = 50;
@@ -106,6 +107,36 @@ function openForm(entKey, row, onSaved) {
 }
 
 export async function renderEntity(entKey) {
+  if (entKey === 'leads') return renderLeadsEntity();
+  return renderEntityTable(entKey);
+}
+
+// Ліди — єдина сутність із двома виглядами: звичайна таблиця й канбан
+// воронки за статусами. Перемикач памʼятає вибір через localStorage.
+async function renderLeadsEntity() {
+  const mode = { current: localStorage.getItem('crm_leads_view') === 'kanban' ? 'kanban' : 'table' };
+  const slot = el('div', {});
+  const tableBtn = el('button', { class: 'btn small' }, 'Таблиця');
+  const kanbanBtn = el('button', { class: 'btn small' }, 'Канбан');
+  const syncButtons = () => {
+    tableBtn.className = `btn small${mode.current === 'table' ? ' primary' : ''}`;
+    kanbanBtn.className = `btn small${mode.current === 'kanban' ? ' primary' : ''}`;
+  };
+  const renderSlot = async () => {
+    slot.textContent = '';
+    slot.append(mode.current === 'kanban' ? await renderLeadsKanban(renderSlot) : await renderEntityTable('leads'));
+  };
+  const switchTo = (m) => { mode.current = m; localStorage.setItem('crm_leads_view', m); syncButtons(); renderSlot(); };
+  tableBtn.onclick = () => switchTo('table');
+  kanbanBtn.onclick = () => switchTo('kanban');
+  syncButtons();
+
+  const wrap = el('div', {}, el('div', { class: 'row', style: 'margin-bottom:14px' }, tableBtn, kanbanBtn), slot);
+  await renderSlot();
+  return wrap;
+}
+
+async function renderEntityTable(entKey) {
   const ent = state.meta[entKey];
   if (!ent) throw new Error('Розділ недоступний для вашої ролі');
   const box = el('div', {});

@@ -134,6 +134,7 @@ export async function createLead(user, payload, { force = false } = {}) {
     status_code: lead.status_code || 'new',
     priority: lead.priority || 'warm',
     score: Number(lead.score || 0),
+    expected_amount: lead.expected_amount === '' || lead.expected_amount == null ? null : Number(lead.expected_amount),
     owner_user_id: lead.owner_user_id ?? user.id,
     team_id: user.team_id ?? null,
     google_place_id: lead.google_place_id ?? null,
@@ -370,6 +371,35 @@ export async function funnel(user, { list_id = null } = {}) {
        FROM leads l WHERE l.first_touch_at IS NOT NULL ${list_id ? 'AND l.list_id = ?' : ''}`, ...params);
 
   return { byStatus, bySource, byChannel, byTouchNumber, disqualified, speed };
+}
+
+const round2 = (v) => Math.round(Number(v || 0) * 100) / 100;
+
+// Канбан воронки: колонки — активні статуси лідів у своєму порядку,
+// у кожній — ліди в скоупі користувача (той самий scopeWhere, що й
+// генерик-список), сума очікуваних сум і кількість.
+export async function kanban(scopeSql, scopeParams) {
+  const statuses = await all('SELECT * FROM lead_statuses WHERE is_active=1 ORDER BY sort_order');
+  const leads = await all(
+    `SELECT l.id, l.company_name, l.status_code, l.expected_amount, l.priority, l.owner_user_id,
+            l.geo_city, l.vertical, u.name AS owner_name
+       FROM leads l LEFT JOIN users u ON u.id=l.owner_user_id
+      WHERE ${scopeSql} ORDER BY l.updated_at DESC, l.created_at DESC`, ...scopeParams);
+
+  const byStatus = new Map(statuses.map((s) => [s.code, []]));
+  for (const lead of leads) byStatus.get(lead.status_code)?.push(lead);
+
+  return {
+    columns: statuses.map((s) => {
+      const rows = byStatus.get(s.code) || [];
+      return {
+        code: s.code, name: s.name, color: s.color, is_won: !!s.is_won, is_terminal: !!s.is_terminal,
+        count: rows.length,
+        sum: round2(rows.reduce((sum, r) => sum + Number(r.expected_amount || 0), 0)),
+        leads: rows,
+      };
+    }),
+  };
 }
 
 // Фонове: розморозка «не зараз» і підсвічування застою.

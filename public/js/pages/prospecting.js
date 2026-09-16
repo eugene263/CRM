@@ -2,7 +2,7 @@
 // логування тачів, швидке додавання й воронка по джерелах.
 import { api } from '../api.js';
 import { state } from '../app.js';
-import { el, modal, toast, num, pct } from '../ui.js';
+import { el, modal, toast, num, pct, money } from '../ui.js';
 import { icon, withIcon } from '../icons.js';
 import { scriptPickerModal, scriptViewerModal } from './scripts.js';
 
@@ -26,7 +26,8 @@ export async function openLead(leadId, onChange = () => {}) {
       el('b', { style: 'font-size:16px' }, lead.company_name),
       el('span', { class: 'badge' }, statusName(lead.status_code)),
       el('span', { class: 'badge' }, { hot: 'Гарячий', warm: 'Теплий', cold: 'Холодний' }[lead.priority] || lead.priority),
-      lead.score ? el('span', { class: 'muted' }, `скоринг ${lead.score}`) : null),
+      lead.score ? el('span', { class: 'muted' }, `скоринг ${lead.score}`) : null,
+      lead.expected_amount ? el('span', { class: 'muted' }, money(lead.expected_amount)) : null),
     el('div', { class: 'muted', style: 'margin-top:4px;font-size:12.5px' },
       [lead.geo_city, lead.geo_country, lead.vertical].filter(Boolean).join(' · ') || '—',
       lead.website ? ' · ' : '', lead.website ? el('a', { href: lead.website, target: '_blank', rel: 'noreferrer' }, 'сайт') : null));
@@ -195,6 +196,7 @@ function addForm(onChange) {
   const ig = el('input', { placeholder: 'instagram нік' });
   const followers = el('input', { type: 'number', placeholder: 'підписники' });
   const lastPost = el('input', { type: 'date' });
+  const amount = el('input', { type: 'number', step: '0.01', placeholder: '0' });
   const list = el('select', {}, el('option', { value: '' }, 'без списку'),
     ...(state.refs.prospect_lists || []).map((l) => el('option', { value: l.id }, l.label)));
   const channel = el('select', {}, ...dictOf('source_channel').map((d) => el('option', { value: d.code }, d.label)));
@@ -211,7 +213,9 @@ function addForm(onChange) {
       el('div', {}, el('label', {}, 'Instagram'), ig),
       el('div', {}, el('label', {}, 'Підписники'), followers),
       el('div', {}, el('label', {}, 'Останній пост'), lastPost)),
-    el('div', { class: 'field' }, el('label', {}, 'Список'), list),
+    el('div', { class: 'row' },
+      el('div', {}, el('label', {}, 'Список'), list),
+      el('div', {}, el('label', {}, 'Очікувана сума, $'), amount)),
     el('div', { class: 'card', style: 'margin-top:8px' }, el('h3', {}, 'Де знайшли *'),
       el('div', { class: 'row' },
         el('div', {}, el('label', {}, 'Канал'), channel),
@@ -225,6 +229,7 @@ function addForm(onChange) {
         website: site.value.trim() || null,
         geo_city: city.value.trim() || null,
         list_id: list.value ? Number(list.value) : null,
+        expected_amount: amount.value ? Number(amount.value) : null,
         socials: ig.value.trim() ? [{
           platform: 'instagram', handle: ig.value.trim().replace('@', ''),
           followers: followers.value ? Number(followers.value) : null,

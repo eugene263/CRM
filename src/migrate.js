@@ -37,6 +37,13 @@ const migrations = [
       if (!cols.has('is_package')) await run('ALTER TABLE services ADD COLUMN is_package INTEGER NOT NULL DEFAULT 0');
     },
   },
+  {
+    id: '2026-09-19-leads-expected-amount',
+    async up() {
+      const cols = await columnsOf('leads');
+      if (!cols.has('expected_amount')) await run('ALTER TABLE leads ADD COLUMN expected_amount REAL');
+    },
+  },
 ];
 
 export async function migrate() {

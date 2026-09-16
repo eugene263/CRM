@@ -528,6 +528,47 @@ test('менеджер з пошуку бачить лише своїх ліді
   assert.equal((await call('/api/leads?limit=100', { as: 'sales' })).data.total, 1);
 });
 
+// ── Канбан воронки лідів ─────────────────────────────────────────────────
+
+test('очікувана сума ліда зберігається і потрапляє в канбан воронки', async () => {
+  const lead = await createLead({ company_name: 'Канбан Тест', source: baseSource, expected_amount: 15000 });
+  assert.equal(lead.status, 200, JSON.stringify(lead.data));
+
+  const card = await call(`/api/prospecting/leads/${lead.data.id}`);
+  assert.equal(Number(card.data.lead.expected_amount), 15000);
+
+  const kanban = await call('/api/prospecting/kanban');
+  const col = kanban.data.columns.find((c) => c.code === 'new');
+  assert.ok(col, 'колонка «Новий» є серед активних статусів');
+  const cardInColumn = col.leads.find((l) => l.id === lead.data.id);
+  assert.ok(cardInColumn, 'новий лід потрапив у свою колонку');
+  assert.equal(Number(cardInColumn.expected_amount), 15000);
+  assert.ok(col.sum >= 15000, 'сума колонки враховує очікувану суму ліда');
+});
+
+test('канбан воронки враховує скоуп ролі', async () => {
+  const own = await createLead({ company_name: 'Канбан свій лід', source: baseSource, expected_amount: 500 }, { as: 'sales' });
+  assert.equal(own.status, 200);
+
+  const kanbanAsSales = await call('/api/prospecting/kanban', { as: 'sales' });
+  const newColSales = kanbanAsSales.data.columns.find((c) => c.code === 'new');
+  assert.ok(newColSales.leads.some((l) => l.id === own.data.id), 'менеджер бачить власний лід у канбані');
+
+  assert.equal((await call('/api/prospecting/kanban', { as: 'creator' })).status, 403, 'крієйтор не має доступу до модуля пошуку взагалі');
+});
+
+test('канбан використовує той самий ендпоїнт статусу — виграш так само заводить клієнта', async () => {
+  const lead = await createLead({ company_name: 'Канбан переможець', source: baseSource, expected_amount: 900 });
+  const win = await call(`/api/prospecting/leads/${lead.data.id}/status`, { method: 'POST', body: { status_code: 'won' } });
+  assert.equal(win.status, 200);
+  assert.ok(win.data.client_id, 'клієнт заводиться автоматично, як і при звичайній зміні статусу');
+
+  const kanban = await call('/api/prospecting/kanban');
+  const wonCol = kanban.data.columns.find((c) => c.code === 'won');
+  assert.ok(wonCol.is_won, 'колонка позначена як виграшна');
+  assert.ok(wonCol.leads.some((l) => l.id === lead.data.id));
+});
+
 // ── Плани та норми ───────────────────────────────────────────────────────
 
 test('калькулятор розкладає ціль по клієнтах на денні норми', async () => {

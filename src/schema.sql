@@ -509,6 +509,7 @@ CREATE TABLE IF NOT EXISTS leads (
   status_code TEXT NOT NULL DEFAULT 'new',
   priority TEXT NOT NULL DEFAULT 'warm',   -- hot|warm|cold
   score INTEGER NOT NULL DEFAULT 0,
+  expected_amount REAL,                    -- очікувана сума угоди, для канбану воронки
   owner_user_id INTEGER REFERENCES users(id),
   team_id INTEGER REFERENCES teams(id),
   disqualify_reason TEXT,

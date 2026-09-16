@@ -384,6 +384,7 @@ export const entities = {
       { name: 'priority', label: 'Пріоритет', type: 'select', list: true, options: S(
         ['hot', 'Гарячий'], ['warm', 'Теплий'], ['cold', 'Холодний']) },
       { name: 'score', label: 'Скоринг', type: 'number', list: true },
+      { name: 'expected_amount', label: 'Очікувана сума, $', type: 'money', list: true },
       { name: 'list_id', label: 'Список', type: 'ref', ref: 'prospect_lists', list: true },
       { name: 'website', label: 'Сайт', type: 'url' },
       { name: 'geo_city', label: 'Місто', type: 'text', list: true },
