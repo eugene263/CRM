@@ -329,9 +329,34 @@ export const entities = {
     ],
   },
 
-  // ── Пошук клієнтів ─────────────────────────────────────────────────────
+  // ── Клієнти ────────────────────────────────────────────────────────────
+  // Одна категорія на весь шлях: від пошуку (списки, ліди, тачі, шаблони,
+  // довідники, чорний список) до вже виграних клієнтів на підписці.
+  clients: {
+    label: 'Поточні клієнти', group: 'Клієнти', icon: 'award', ownField: 'owner_user_id', teamField: 'team_id',
+    title: 'name', defaultSort: 'created_at DESC',
+    fields: [
+      { name: 'name', label: 'Клієнт', type: 'text', required: true, list: true },
+      { name: 'status', label: 'Статус', type: 'select', list: true, readOnly: true, options: S(
+        ['active', 'Активний'], ['paused', 'На паузі'], ['churned', 'Пішов']) },
+      { name: 'geo_city', label: 'Місто', type: 'text', list: true },
+      { name: 'geo_country', label: 'Країна', type: 'text' },
+      { name: 'vertical', label: 'Вертикаль', type: 'text', list: true },
+      { name: 'website', label: 'Сайт', type: 'url' },
+      { name: 'contact_name', label: 'Контактна особа', type: 'text' },
+      { name: 'contact_email', label: 'Email', type: 'text' },
+      { name: 'contact_phone', label: 'Телефон', type: 'text' },
+      { name: 'owner_user_id', label: 'Менеджер', type: 'ref', ref: 'users', list: true },
+      { name: 'team_id', label: 'Команда', type: 'ref', ref: 'teams' },
+      { name: 'source_lead_id', label: 'Із ліда', type: 'ref', ref: 'leads', readOnly: true },
+      { name: 'started_at', label: 'Клієнт з', type: 'date', list: true },
+      { name: 'churned_at', label: 'Пішов', type: 'date', readOnly: true, list: true },
+      { name: 'churn_reason', label: 'Причина відтоку', type: 'text', readOnly: true },
+      { name: 'note', label: 'Нотатка', type: 'textarea' },
+    ],
+  },
   prospect_lists: {
-    label: 'Списки пошуку', group: 'Пошук клієнтів', icon: 'layers', ownField: 'owner_user_id', teamField: 'team_id', title: 'name',
+    label: 'Списки пошуку', group: 'Клієнти', icon: 'layers', ownField: 'owner_user_id', teamField: 'team_id', title: 'name',
     fields: [
       { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
       { name: 'description', label: 'Гіпотеза / опис', type: 'textarea' },
@@ -351,7 +376,7 @@ export const entities = {
     ],
   },
   leads: {
-    label: 'Ліди', group: 'Пошук клієнтів', icon: 'target', ownField: 'owner_user_id', teamField: 'team_id', title: 'company_name',
+    label: 'Ліди', group: 'Клієнти', icon: 'target', ownField: 'owner_user_id', teamField: 'team_id', title: 'company_name',
     defaultSort: 'created_at DESC',
     fields: [
       { name: 'company_name', label: 'Бізнес', type: 'text', required: true, list: true },
@@ -382,7 +407,7 @@ export const entities = {
     ],
   },
   touches: {
-    label: 'Тачі', group: 'Пошук клієнтів', icon: 'mail', ownField: 'user_id', readOnlyEntity: true, defaultSort: 'sent_at DESC',
+    label: 'Тачі', group: 'Клієнти', icon: 'mail', ownField: 'user_id', readOnlyEntity: true, defaultSort: 'sent_at DESC',
     fields: [
       { name: 'sent_at', label: 'Коли', type: 'datetime', list: true },
       { name: 'lead_id', label: 'Лід', type: 'ref', ref: 'leads', list: true },
@@ -398,7 +423,7 @@ export const entities = {
     ],
   },
   message_templates: {
-    label: 'Шаблони повідомлень', group: 'Пошук клієнтів', icon: 'fileText', title: 'name',
+    label: 'Шаблони повідомлень', group: 'Клієнти', icon: 'fileText', title: 'name',
     fields: [
       { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
       { name: 'channel', label: 'Канал', type: 'text', list: true },
@@ -409,7 +434,7 @@ export const entities = {
     ],
   },
   scripts: {
-    label: 'Шаблони скриптів', group: 'Пошук клієнтів', icon: 'script', title: 'name',
+    label: 'Шаблони скриптів', group: 'Клієнти', icon: 'script', title: 'name',
     fields: [
       { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
       { name: 'category', label: 'Категорія', type: 'text', list: true, hint: 'cold_call, demo, onboarding…' },
@@ -421,7 +446,7 @@ export const entities = {
     ],
   },
   lead_statuses: {
-    label: 'Статуси лідів', group: 'Пошук клієнтів', icon: 'flag', title: 'name', defaultSort: 'sort_order ASC',
+    label: 'Статуси лідів', group: 'Клієнти', icon: 'flag', title: 'name', defaultSort: 'sort_order ASC',
     fields: [
       { name: 'code', label: 'Код', type: 'text', required: true, list: true },
       { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
@@ -433,7 +458,7 @@ export const entities = {
     ],
   },
   dictionaries: {
-    label: 'Довідники', group: 'Пошук клієнтів', icon: 'book', title: 'label', defaultSort: 'kind ASC',
+    label: 'Довідники', group: 'Клієнти', icon: 'book', title: 'label', defaultSort: 'kind ASC',
     fields: [
       { name: 'kind', label: 'Довідник', type: 'select', required: true, list: true, options: S(
         ['source_channel', 'Канали джерел'], ['touch_channel', 'Канали звʼязку'],
@@ -445,7 +470,7 @@ export const entities = {
     ],
   },
   suppression_list: {
-    label: 'Чорний список', group: 'Пошук клієнтів', icon: 'ban', defaultSort: 'created_at DESC',
+    label: 'Чорний список', group: 'Клієнти', icon: 'ban', defaultSort: 'created_at DESC',
     fields: [
       { name: 'kind', label: 'Тип', type: 'select', required: true, list: true, options: S(
         ['domain', 'Домен'], ['email', 'Email'], ['phone', 'Телефон'], ['instagram', 'Instagram'], ['company', 'Назва']) },
@@ -453,32 +478,6 @@ export const entities = {
       { name: 'reason', label: 'Причина', type: 'text', list: true },
       { name: 'added_by', label: 'Хто додав', type: 'ref', ref: 'users', list: true },
       { name: 'created_at', label: 'Коли', type: 'datetime', readOnly: true, list: true },
-    ],
-  },
-
-  // ── Клієнти ────────────────────────────────────────────────────────────
-  // Лід виграно → клієнт створюється сам; тут він живе окремо від воронки.
-  clients: {
-    label: 'Клієнти', group: 'Клієнти', icon: 'award', ownField: 'owner_user_id', teamField: 'team_id',
-    title: 'name', defaultSort: 'created_at DESC',
-    fields: [
-      { name: 'name', label: 'Клієнт', type: 'text', required: true, list: true },
-      { name: 'status', label: 'Статус', type: 'select', list: true, readOnly: true, options: S(
-        ['active', 'Активний'], ['paused', 'На паузі'], ['churned', 'Пішов']) },
-      { name: 'geo_city', label: 'Місто', type: 'text', list: true },
-      { name: 'geo_country', label: 'Країна', type: 'text' },
-      { name: 'vertical', label: 'Вертикаль', type: 'text', list: true },
-      { name: 'website', label: 'Сайт', type: 'url' },
-      { name: 'contact_name', label: 'Контактна особа', type: 'text' },
-      { name: 'contact_email', label: 'Email', type: 'text' },
-      { name: 'contact_phone', label: 'Телефон', type: 'text' },
-      { name: 'owner_user_id', label: 'Менеджер', type: 'ref', ref: 'users', list: true },
-      { name: 'team_id', label: 'Команда', type: 'ref', ref: 'teams' },
-      { name: 'source_lead_id', label: 'Із ліда', type: 'ref', ref: 'leads', readOnly: true },
-      { name: 'started_at', label: 'Клієнт з', type: 'date', list: true },
-      { name: 'churned_at', label: 'Пішов', type: 'date', readOnly: true, list: true },
-      { name: 'churn_reason', label: 'Причина відтоку', type: 'text', readOnly: true },
-      { name: 'note', label: 'Нотатка', type: 'textarea' },
     ],
   },
 
