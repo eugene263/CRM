@@ -240,22 +240,32 @@ export async function syncNewRoles() {
   return { added: missing.length };
 }
 
+// Бекфілідемпотентний за парою (роль, сутність), а не за самою сутністю:
+// якщо нову сутність і нову роль додали в одному оновленні, syncNewRoles()
+// (вище) устигає дати новій ролі рядки на все, включно зі свіжими
+// сутностями — тоді перевірка «чи є хоч один рядок на цю сутність» бачить
+// її вже «відомою» і мовчки пропускає бекфіл для решти, вже існуючих
+// ролей (власника включно). Саме так «Пошук клієнтів» лишив owner/head/
+// teamlead без доступу до leads/prospect_lists/touches і подібних —
+// рядок для sales уже існував, тому цикл нижче вважав сутність знайомою.
 export async function syncNewEntities() {
-  const known = new Set((await all('SELECT DISTINCT entity FROM role_permissions')).map((r) => r.entity));
-  const missing = Object.keys(entities).filter((k) => !known.has(k));
-  if (!missing.length) return { added: 0 };
-  for (const role of await all('SELECT key FROM roles')) {
-    for (const entityKey of missing) {
+  const known = new Set((await all('SELECT role_key, entity FROM role_permissions')).map((r) => `${r.role_key}:${r.entity}`));
+  const roles = await all('SELECT key FROM roles');
+  let added = 0;
+  for (const role of roles) {
+    for (const entityKey of Object.keys(entities)) {
+      if (known.has(`${role.key}:${entityKey}`)) continue;
       const r = defaultRule(role.key, entityKey);
       const hidden = entities[entityKey].fields.filter((f) => (f.hideFor || []).includes(role.key)).map((f) => f.name);
       await insert('role_permissions', {
         role_key: role.key, entity: entityKey, level: r.level, scope: r.scope,
         hidden_fields: hidden.join(',') || null,
       });
+      added += 1;
     }
   }
-  await refreshRbac();
-  return { added: missing.length };
+  if (added) await refreshRbac();
+  return { added };
 }
 
 function defaultRule(roleKey, entityKey) {

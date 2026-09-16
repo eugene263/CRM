@@ -2,9 +2,11 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import pg from 'pg';
 
 // Той самий набір ганяється на обох двигунах: без CRM_TEST_DATABASE_URL —
 // SQLite, з нею — Postgres (npm run test:pg).
@@ -969,4 +971,53 @@ test('зведення по клієнтах рахує лічильники й 
   assert.equal(summary.data.total, summary.data.active + summary.data.paused + summary.data.churned);
   assert.ok('mrr' in summary.data && 'churn_rate_30d' in summary.data);
   assert.equal((await call('/api/clients/summary', { as: 'creator' })).status, 403);
+});
+
+// ── RBAC: бекфіл прав при оновленні ─────────────────────────────────────
+
+async function deleteRolePermissionRows(roleKey, entityKeys) {
+  if (PG_URL) {
+    const client = new pg.Client({ connectionString: PG_URL });
+    await client.connect();
+    await client.query('DELETE FROM role_permissions WHERE role_key=$1 AND entity = ANY($2)', [roleKey, entityKeys]);
+    await client.end();
+  } else {
+    const db = new DatabaseSync(dbFile);
+    const placeholders = entityKeys.map(() => '?').join(',');
+    db.prepare(`DELETE FROM role_permissions WHERE role_key=? AND entity IN (${placeholders})`).run(roleKey, ...entityKeys);
+    db.close();
+  }
+}
+
+test('перезапуск сам дозаповнює права ролі, які випали через гонку «нова роль + нова сутність в одному релізі»', async () => {
+  // Відтворює реальний прод-баг: коли «Пошук клієнтів» додав одразу і нову
+  // роль (sales), і нові сутності (leads, prospect_lists, touches…),
+  // syncNewRoles() встиг дати sales рядки на всі сутності раніше, ніж
+  // syncNewEntities() перевіряв, чи сутність уже «відома». Стара перевірка
+  // дивилась лише на сам факт існування хоч одного рядка для сутності —
+  // тому власник (і будь-яка інша давня роль) лишався без бекфілу назавжди,
+  // хоча дефолтна матриця в коді каже, що власник має full/all на все.
+  await deleteRolePermissionRows('owner', ['leads', 'prospect_lists', 'touches']);
+
+  const port2 = PORT + 700;
+  const env2 = { ...env, CRM_PORT: String(port2), CRM_POSTBACK_PORT: String(port2 + 1) };
+  const server2 = spawn(process.execPath, ['server.js'], { env: env2, cwd: path.join(import.meta.dirname, '..') });
+  try {
+    for (let i = 0; i < 50; i += 1) {
+      try { await fetch(`http://127.0.0.1:${port2}/health`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+    }
+    const login2 = await fetch(`http://127.0.0.1:${port2}/api/auth/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'owner@gennect.local', password: 'gennect-admin' }),
+    });
+    assert.equal(login2.status, 200);
+    const cookie2 = login2.headers.getSetCookie()[0].split(';')[0];
+
+    for (const p of ['/api/leads?limit=1', '/api/prospect_lists?limit=1', '/api/touches?limit=1']) {
+      const res = await fetch(`http://127.0.0.1:${port2}${p}`, { headers: { cookie: cookie2 } });
+      assert.equal(res.status, 200, `перезапуск сам відновлює доступ власника до ${p}`);
+    }
+  } finally {
+    server2.kill();
+  }
 });
