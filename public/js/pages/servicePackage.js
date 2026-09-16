@@ -23,7 +23,7 @@ export async function serviceCardModal(serviceId, onChange = () => {}) {
   const description = el('textarea', { rows: 2 }, service.description || '');
 
   const fieldsBlock = el('div', {},
-    el('div', { class: 'field' }, el('label', {}, isPackage ? 'Пакет' : 'Послуга'), name),
+    el('div', { class: 'field' }, el('label', {}, 'Пакети'), name),
     el('div', { class: 'row' },
       el('div', {}, el('label', {}, 'Категорія'), category),
       el('div', {}, el('label', {}, 'Одиниця'), unit)),
@@ -88,7 +88,7 @@ export async function serviceCardModal(serviceId, onChange = () => {}) {
     },
   }, 'Зберегти');
 
-  const box = modal(`${isPackage ? 'Пакет' : 'Послуга'} · ${service.name}`, el('div', {}, fieldsBlock, packageBlock), [save]);
+  const box = modal(`Пакети · ${service.name}`, el('div', {}, fieldsBlock, packageBlock), [save]);
   return box;
 }
 
