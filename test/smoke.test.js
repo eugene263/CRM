@@ -617,6 +617,16 @@ test('AI-пошук без налаштованого ключа поверта�
   })).status, 403, 'крієйтор не має прав додавати лідів — і до AI-пошуку теж');
 });
 
+test('AI-чат без налаштованого ключа повертає зрозумілу помилку, а не тихий збій', async () => {
+  const empty = await call('/api/ai/chat', { method: 'POST', body: { messages: [] } });
+  assert.equal(empty.status, 400);
+  assert.match(empty.data.error, /Порожнє/);
+
+  const res = await call('/api/ai/chat', { method: 'POST', body: { messages: [{ role: 'user', text: 'Створи ліда Тест' }] } });
+  assert.equal(res.status, 400);
+  assert.match(res.data.error, /GEMINI_API_KEY/);
+});
+
 // ── Плани та норми ───────────────────────────────────────────────────────
 
 test('калькулятор розкладає ціль по клієнтах на денні норми', async () => {

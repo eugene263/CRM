@@ -4,6 +4,7 @@ import { all, get, run, insert, update, audit } from './db.js';
 import { notify } from './telegram.js';
 import { checkChannelLimit } from './kpi.js';
 import { ensureClientFromLead } from './clients.js';
+import { hasGeminiKeys, geminiText } from './ai.js';
 
 const now = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 const today = () => new Date().toISOString().slice(0, 10);
@@ -421,39 +422,8 @@ export async function listContacts(listId, scopeSql, scopeParams) {
 
 // Google AI Studio видає GEMINI_API_KEY безкоштовно (з лімітами на
 // кількість запитів) — тому саме він у пріоритеті, ANTHROPIC_API_KEY
-// лишається як платна альтернатива, якщо вона вже є.
-// GEMINI_API_KEYS може містити кілька ключів через кому (кілька безкоштовних
-// акаунтів = вищий сумарний ліміт запитів) — по колу на кожен виклик,
-// а на 429 (вичерпано ліміт) пробуємо наступний ключ зі списку.
-function geminiKeys() {
-  const list = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
-  return list.split(',').map((k) => k.trim()).filter(Boolean);
-}
-let geminiKeyCursor = 0;
-
-async function callGemini(prompt) {
-  const model = 'gemini-3.6-flash';
-  const keys = geminiKeys();
-  let lastError;
-  for (let i = 0; i < keys.length; i += 1) {
-    const apiKey = keys[(geminiKeyCursor + i) % keys.length];
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-    });
-    if (res.ok) {
-      geminiKeyCursor = (geminiKeyCursor + i + 1) % keys.length;
-      const data = await res.json();
-      return (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
-    }
-    const text = await res.text();
-    lastError = Object.assign(new Error(`AI-пошук: помилка Gemini API (${res.status}): ${text.slice(0, 300)}`), { status: 502 });
-    if (res.status !== 429) throw lastError;
-  }
-  throw lastError;
-}
-
+// лишається як платна альтернатива, якщо вона вже є. Сам клієнт до Gemini
+// (з ротацією кількох ключів) спільний з AI-чатом — див. ai.js.
 async function callAnthropic(apiKey, prompt) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -473,9 +443,8 @@ async function callAnthropic(apiKey, prompt) {
 // під нішу/гео/джерело — людина перевіряє й обирає, кого справді додати
 // лідом (createLead викликає сама сторінка, тут лише список кандидатів).
 export async function aiSearchCandidates({ channel, niche, geo, count, notes }) {
-  const hasGemini = geminiKeys().length > 0;
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!hasGemini && !anthropicKey) {
+  if (!hasGeminiKeys() && !anthropicKey) {
     throw Object.assign(new Error(
       'AI-пошук не налаштовано: додайте змінну середовища GEMINI_API_KEY (безкоштовний ключ із Google AI Studio) або ANTHROPIC_API_KEY сервісу crm на Railway'), { status: 400 });
   }
@@ -492,7 +461,7 @@ export async function aiSearchCandidates({ channel, niche, geo, count, notes }) 
 
 Поверни СУВОРО валідний JSON-масив без жодного тексту навколо, формат кожного елемента: {"company_name": "...", "geo_city": "...", "reason": "..."}`;
 
-  const raw = hasGemini ? await callGemini(prompt) : await callAnthropic(anthropicKey, prompt);
+  const raw = hasGeminiKeys() ? await geminiText(prompt) : await callAnthropic(anthropicKey, prompt);
   let candidates;
   try {
     candidates = JSON.parse(raw);

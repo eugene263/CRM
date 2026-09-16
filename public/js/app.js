@@ -11,6 +11,7 @@ import { renderRoles } from './pages/roles.js';
 import { renderProspecting } from './pages/prospecting.js';
 import { renderPlans } from './pages/plans.js';
 import { renderListDetailPage } from './pages/prospectLists.js';
+import { mountAiButton } from './aiChat.js';
 
 export const state = {
   user: null, meta: {}, locked: [], refs: {}, caps: {},
@@ -88,6 +89,7 @@ async function start() {
   $('#date-to').value = state.range.to;
   applyTheme(document.documentElement.dataset.theme || 'dark');
   buildNav();
+  mountAiButton();
   window.addEventListener('hashchange', route);
   route();
 }

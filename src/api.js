@@ -8,6 +8,7 @@ import {
 } from './rbac.js';
 import * as vault from './vault.js';
 import * as prospecting from './prospecting.js';
+import * as aiAssistant from './aiAssistant.js';
 import * as kpi from './kpi.js';
 import * as costing from './costing.js';
 import * as scripts from './scripts.js';
@@ -236,6 +237,44 @@ async function listRows(user, entKey, query) {
   return { rows, total, limit, offset };
 }
 
+// Ці три функції — та сама логіка, що й генерик-CRUD нижче в handleApi,
+// винесена окремо, щоб AI-асистент (aiAssistant.js) міг створювати й
+// оновлювати записи через ті самі перевірки прав/скоупу й хуки, без HTTP.
+export async function listEntityRows(user, entKey, query) {
+  const ent = entities[entKey];
+  if (!ent) throw Object.assign(new Error('Невідома сутність'), { status: 404 });
+  if (!can(user, entKey, 'read')) throw Object.assign(new Error('Немає доступу до цього розділу'), { status: 403 });
+  return listRows(user, entKey, query);
+}
+
+export async function createEntityRecord(user, entKey, body, ip) {
+  const ent = entities[entKey];
+  if (!ent) throw Object.assign(new Error('Невідома сутність'), { status: 404 });
+  if (!can(user, entKey, 'create')) throw Object.assign(new Error('Немає прав на створення'), { status: 403 });
+  let data = buildPayload(user, entKey, body, { isCreate: true });
+  data = enforceScopeOnWrite(user, entKey, data, { isCreate: true });
+  if (hooks[entKey]?.beforeWrite) data = await hooks[entKey].beforeWrite(user, data, body, { isCreate: true, current: null });
+  const newId = await insert(ent.table, data);
+  await hooks[entKey]?.afterWrite?.(user, newId, data, { isCreate: true, current: null });
+  await audit({ user_id: user.id, action: 'create', entity: entKey, entity_id: newId, payload: redact(ent, data), ip });
+  return sanitize(user, entKey, await get(`SELECT * FROM ${ent.table} WHERE id=?`, newId));
+}
+
+export async function updateEntityRecord(user, entKey, id, body, ip) {
+  const ent = entities[entKey];
+  if (!ent) throw Object.assign(new Error('Невідома сутність'), { status: 404 });
+  if (!can(user, entKey, 'update')) throw Object.assign(new Error('Немає прав на редагування'), { status: 403 });
+  const current = await get(`SELECT * FROM ${ent.table} WHERE id=?`, id);
+  if (!current || !ownsRow(user, entKey, current)) throw Object.assign(new Error('Запис не знайдено'), { status: 404 });
+  let data = buildPayload(user, entKey, body, { isCreate: false });
+  data = enforceScopeOnWrite(user, entKey, data, { isCreate: false });
+  if (hooks[entKey]?.beforeWrite) data = await hooks[entKey].beforeWrite(user, data, body, { isCreate: false, current });
+  await update(ent.table, id, data);
+  await hooks[entKey]?.afterWrite?.(user, id, data, { isCreate: false, current });
+  await audit({ user_id: user.id, action: 'update', entity: entKey, entity_id: id, payload: redact(ent, data), ip });
+  return sanitize(user, entKey, await get(`SELECT * FROM ${ent.table} WHERE id=?`, id));
+}
+
 // Довідники для випадаючих списків (id → підпис).
 async function refOptions(user) {
   const out = {};
@@ -309,6 +348,17 @@ export async function handleApi(req, res, url) {
     }
     if (seg[1] === 'sessions') return ok(res, { rows: await auth.sessionsOf(user.id) });
     return fail(res, 404, 'Немає такого ендпоїнта');
+  }
+
+  // --- AI-чат (плаваюча кнопка «AI») ---
+  if (seg[0] === 'ai' && seg[1] === 'chat' && req.method === 'POST') {
+    // Один запит може смикнути Gemini до MAX_STEPS разів — обмежуємо, щоб
+    // одна людина не вижерла спільний безкоштовний ліміт усіх ключів.
+    if (!rateLimit(`ai-chat:${user.id}`, 20, 5 * 60_000)) {
+      return fail(res, 429, 'Забагато запитів до AI-чату, спробуйте за кілька хвилин');
+    }
+    const body = await readBody(req);
+    return ok(res, await aiAssistant.runAiChat(user, body.messages));
   }
 
   // --- метадані для інтерфейсу ---
@@ -772,29 +822,14 @@ export async function handleApi(req, res, url) {
   }
 
   if (req.method === 'POST' && !seg[1]) {
-    if (!can(user, entKey, 'create')) return fail(res, 403, 'Немає прав на створення');
     const body = await readBody(req);
-    let data = buildPayload(user, entKey, body, { isCreate: true });
-    data = enforceScopeOnWrite(user, entKey, data, { isCreate: true });
-    if (hooks[entKey]?.beforeWrite) data = await hooks[entKey].beforeWrite(user, data, body, { isCreate: true, current: null });
-    const newId = await insert(ent.table, data);
-    await hooks[entKey]?.afterWrite?.(user, newId, data, { isCreate: true, current: null });
-    await audit({ user_id: user.id, action: 'create', entity: entKey, entity_id: newId, payload: redact(ent, data), ip });
-    return ok(res, { id: newId, row: sanitize(user, entKey, await get(`SELECT * FROM ${ent.table} WHERE id=?`, newId)) });
+    const row = await createEntityRecord(user, entKey, body, ip);
+    return ok(res, { id: row.id, row });
   }
 
   if ((req.method === 'PUT' || req.method === 'PATCH') && id) {
-    if (!can(user, entKey, 'update')) return fail(res, 403, 'Немає прав на редагування');
-    const current = await get(`SELECT * FROM ${ent.table} WHERE id=?`, id);
-    if (!current || !ownsRow(user, entKey, current)) return fail(res, 404, 'Запис не знайдено');
     const body = await readBody(req);
-    let data = buildPayload(user, entKey, body, { isCreate: false });
-    data = enforceScopeOnWrite(user, entKey, data, { isCreate: false });
-    if (hooks[entKey]?.beforeWrite) data = await hooks[entKey].beforeWrite(user, data, body, { isCreate: false, current });
-    await update(ent.table, id, data);
-    await hooks[entKey]?.afterWrite?.(user, id, data, { isCreate: false, current });
-    await audit({ user_id: user.id, action: 'update', entity: entKey, entity_id: id, payload: redact(ent, data), ip });
-    return ok(res, { row: sanitize(user, entKey, await get(`SELECT * FROM ${ent.table} WHERE id=?`, id)) });
+    return ok(res, { row: await updateEntityRecord(user, entKey, id, body, ip) });
   }
 
   if (req.method === 'DELETE' && id) {
