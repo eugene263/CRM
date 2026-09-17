@@ -1,11 +1,13 @@
 // Картка послуги: звичайні поля (назва, категорія, одиниця, ціна, маржа,
-// обсяг, статус) і, тут же, унизу — компоненти пакета зі своєю кнопкою
-// «Додати». Щойно компонент додано, послуга сама стає пакетом
+// обсяг, статус), склад собівартості й компоненти пакета — кожен блок зі
+// своєю кнопкою «Додати». Щойно компонент додано, послуга сама стає пакетом
 // (services.is_package=1, costing.js), а ціна далі рахується автоматично —
 // поле ціни стає нередагованим.
 import { api } from '../api.js';
-import { el, money, modal, toast, editableCell } from '../ui.js';
+import { state } from '../app.js';
+import { el, money, modal, toast, editableCell, actionButton } from '../ui.js';
 import { icon, withIcon } from '../icons.js';
+import { costLinesBlock } from './costLines.js';
 
 const STATUS_OPTIONS = [['active', 'Активна'], ['draft', 'Чернетка'], ['archived', 'Архів']];
 
@@ -70,6 +72,16 @@ export async function serviceCardModal(serviceId, onChange = () => {}) {
       el('tbody', {}, ...(rows.length ? rows : [el('tr', {}, el('td', { colspan: 6, class: 'muted' }, 'Компонентів ще немає'))])))),
     el('button', { class: 'btn small', style: 'margin-top:8px', onclick: () => addItemForm(serviceId, onChange, box) }, withIcon('plus', 'Додати')));
 
+  // Склад собівартості цієї ж послуги — тут, а не тільки у «Фінанси →
+  // Собівартість»: коли дописуєш рядок витрат, робиш це в тій самій картці,
+  // де стоїть ціна й маржа, на які він і впливає.
+  const costBlock = el('div', { style: 'margin-top:16px' },
+    el('h3', {}, icon('calculator'), 'Собівартість: складові витрат'),
+    await costLinesBlock(serviceId, {
+      canEdit: !!state.meta.services?.can.update,
+      onChange,
+    }));
+
   const save = el('button', {
     class: 'btn primary',
     onclick: async () => {
@@ -88,7 +100,7 @@ export async function serviceCardModal(serviceId, onChange = () => {}) {
     },
   }, 'Зберегти');
 
-  const box = modal(`Пакети · ${service.name}`, el('div', {}, fieldsBlock, packageBlock), [save]);
+  const box = modal(`Пакети · ${service.name}`, el('div', {}, fieldsBlock, costBlock, packageBlock), [save]);
   return box;
 }
 
@@ -103,15 +115,12 @@ async function addItemForm(serviceId, onChange, parentBox) {
     el('div', { class: 'field' }, el('label', {}, 'Пакети'), service),
     el('div', { class: 'field' }, el('label', {}, 'Кількість'), quantity));
 
-  const box2 = modal('Додати в пакети', form, [el('button', {
-    class: 'btn primary',
-    onclick: async () => {
-      try {
-        await api.post(`/costing/services/${serviceId}/package/items`, {
-          component_service_id: Number(service.value), quantity: Number(quantity.value) || 1,
-        });
-        box2.remove(); parentBox.remove(); serviceCardModal(serviceId, onChange); onChange();
-      } catch (e) { toast(e.message, true); }
-    },
-  }, 'Додати')]);
+  const box2 = modal('Додати в пакети', form, [actionButton('Додати', async () => {
+    try {
+      await api.post(`/costing/services/${serviceId}/package/items`, {
+        component_service_id: Number(service.value), quantity: Number(quantity.value) || 1,
+      });
+      box2.remove(); parentBox.remove(); serviceCardModal(serviceId, onChange); onChange();
+    } catch (e) { toast(e.message, true); }
+  })]);
 }

@@ -34,6 +34,24 @@ export function toast(message, isError = false) {
   setTimeout(() => t.remove(), 4200);
 }
 
+// Кнопка дії, яку не можна натиснути двічі: доки асинхронний обробник не
+// завершився, повторні кліки ігноруються. Без цього нетерплячий подвійний
+// клік по «Додати» шле два однакові POST — і в базі два однакові рядки
+// (саме так це й відтворилось у браузері).
+export function actionButton(label, handler, { className = 'btn primary' } = {}) {
+  let busy = false;
+  const btn = el('button', {
+    class: className,
+    onclick: async () => {
+      if (busy) return;
+      busy = true;
+      btn.disabled = true;
+      try { await handler(); } finally { busy = false; btn.disabled = false; }
+    },
+  }, label);
+  return btn;
+}
+
 export function modal(title, content, actions = []) {
   const bg = el('div', { class: 'drawer-bg', onclick: (e) => { if (e.target === bg) bg.remove(); } });
   const box = el('div', { class: 'drawer' }, el('h3', {}, title), content,
