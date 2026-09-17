@@ -123,6 +123,18 @@ const migrations = [
       await run('CREATE INDEX IF NOT EXISTS ix_payout_reports_period ON payout_reports(period, user_id)');
     },
   },
+  {
+    // Звіти тепер несуть і час, витрачений командою за місяць, — не лише
+    // гроші. Окрема колонка в payouts, бо годин — це підтверджене число
+    // (як fix_amount), яке живе доти, доки хтось не підставить нове.
+    id: '2026-09-24-payout-hours',
+    async up() {
+      const reportCols = await columnsOf('payout_reports');
+      if (!reportCols.has('ai_hours')) await run('ALTER TABLE payout_reports ADD COLUMN ai_hours REAL');
+      const payoutCols = await columnsOf('payouts');
+      if (!payoutCols.has('hours')) await run('ALTER TABLE payouts ADD COLUMN hours REAL NOT NULL DEFAULT 0');
+    },
+  },
 ];
 
 export async function migrate() {

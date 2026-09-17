@@ -56,6 +56,7 @@ export async function overview(user) {
   const months = await all(
     `SELECT p.period AS period,
             COALESCE(SUM(p.total), 0) AS total,
+            COALESCE(SUM(p.hours), 0) AS hours,
             COALESCE(SUM(CASE WHEN p.status = 'paid' THEN p.total ELSE 0 END), 0) AS paid,
             COUNT(DISTINCT p.user_id) AS people
        FROM payouts p
@@ -84,15 +85,17 @@ export async function overview(user) {
       month: Number(m),
       month_name: monthName(Number(m)),
       total: Number(row.total || 0),
+      hours: Number(row.hours || 0),
       paid: Number(row.paid || 0),
       people: Number(row.people || 0),
       reports: Number(reportsBy[period]?.c || 0),
       reported_people: Number(reportsBy[period]?.people || 0),
     };
-    if (!years.has(y)) years.set(y, { year: Number(y), total: 0, people: 0, reports: 0, months: [] });
+    if (!years.has(y)) years.set(y, { year: Number(y), total: 0, hours: 0, people: 0, reports: 0, months: [] });
     const year = years.get(y);
     year.months.push(month);
     year.total += month.total;
+    year.hours += month.hours;
     year.reports += month.reports;
     year.people = Math.max(year.people, month.people);
   }
@@ -106,15 +109,17 @@ export async function summary(user) {
   const prev = shiftPeriod(now, -1);
   const threeFrom = shiftPeriod(now, -2);
 
-  const sum = async (extraSql, ...extra) => Number((await get(
-    `SELECT COALESCE(SUM(p.total), 0) AS v FROM payouts p
+  const sum = async (column, extraSql, ...extra) => Number((await get(
+    `SELECT COALESCE(SUM(p.${column}), 0) AS v FROM payouts p
       WHERE ${scope.sql} AND p.status <> 'canceled' ${extraSql}`,
     ...scope.params, ...extra))?.v || 0);
 
-  const month = await sum('AND p.period = ?', now);
-  const prevMonth = await sum('AND p.period = ?', prev);
-  const quarter = await sum('AND p.period >= ? AND p.period <= ?', threeFrom, now);
-  const unpaid = await sum(`AND p.status = 'accrued'`);
+  const month = await sum('total', 'AND p.period = ?', now);
+  const prevMonth = await sum('total', 'AND p.period = ?', prev);
+  const quarter = await sum('total', 'AND p.period >= ? AND p.period <= ?', threeFrom, now);
+  const unpaid = await sum('total', `AND p.status = 'accrued'`);
+  const monthHours = await sum('hours', 'AND p.period = ?', now);
+  const quarterHours = await sum('hours', 'AND p.period >= ? AND p.period <= ?', threeFrom, now);
 
   const unpaidCount = Number((await get(
     `SELECT COUNT(*) AS c FROM payouts p WHERE ${scope.sql} AND p.status = 'accrued'`,
@@ -141,6 +146,8 @@ export async function summary(user) {
     avg_month: quarter / 3,
     unpaid_total: unpaid,
     unpaid_count: unpaidCount,
+    month_hours: monthHours,
+    quarter_hours: quarterHours,
     people,
     team_size: ids.length,
     reported_people: reported,
@@ -223,9 +230,10 @@ export async function reportOwner(id) {
 // ── Читання PDF через ШІ ────────────────────────────────────────────────
 const ANALYZE_PROMPT = `Ти читаєш звіт співробітника за місяць з PDF-файлу.
 Поверни СУВОРО JSON-обʼєкт без пояснень і без markdown:
-{"amount": число або null, "currency": "USD"|"UAH"|"EUR"|null, "period": "YYYY-MM" або null, "summary": "1-2 речення українською про зміст звіту"}
+{"amount": число або null, "currency": "USD"|"UAH"|"EUR"|null, "period": "YYYY-MM" або null, "hours": число або null, "summary": "1-2 речення українською про зміст звіту"}
 amount — підсумкова сума до виплати за цей звіт (якщо в документі кілька сум, бери фінальну/підсумкову).
-Якщо суми в документі немає — amount: null. Не вигадуй цифр, яких немає в PDF.`;
+hours — скільки годин загалом відпрацьовано за звітний період (якщо в документі є облік часу за днями/задачами — просумуй їх).
+Якщо суми чи годин у документі немає — став null для відповідного поля. Не вигадуй цифр, яких немає в PDF.`;
 
 function parseAnalysis(text) {
   const raw = String(text || '').replace(/```json|```/g, '').trim();
@@ -235,10 +243,13 @@ function parseAnalysis(text) {
   const parsed = JSON.parse(raw.slice(start, end + 1));
   const amount = parsed.amount === null || parsed.amount === undefined || parsed.amount === ''
     ? null : Number(parsed.amount);
+  const hours = parsed.hours === null || parsed.hours === undefined || parsed.hours === ''
+    ? null : Number(parsed.hours);
   return {
     amount: Number.isFinite(amount) ? amount : null,
     currency: parsed.currency ? String(parsed.currency).slice(0, 8) : null,
     period: isPeriod(parsed.period) ? String(parsed.period) : null,
+    hours: Number.isFinite(hours) ? hours : null,
     summary: parsed.summary ? String(parsed.summary).slice(0, 1000) : null,
   };
 }
@@ -262,8 +273,8 @@ export async function analyzeReport(id) {
     const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
     const parsed = parseAnalysis(text);
     await run(
-      `UPDATE payout_reports SET ai_status='ok', ai_amount=?, ai_currency=?, ai_period=?, ai_summary=?, ai_error=NULL WHERE id=?`,
-      parsed.amount, parsed.currency, parsed.period, parsed.summary, Number(id));
+      `UPDATE payout_reports SET ai_status='ok', ai_amount=?, ai_currency=?, ai_period=?, ai_hours=?, ai_summary=?, ai_error=NULL WHERE id=?`,
+      parsed.amount, parsed.currency, parsed.period, parsed.hours, parsed.summary, Number(id));
   } catch (e) {
     // Збій розбору не втрачає сам файл: він лишається вкладеним, а причина
     // видно в картці, щоб можна було спробувати ще раз або вбити суму руками.
@@ -273,30 +284,81 @@ export async function analyzeReport(id) {
   return getReport(id);
 }
 
-// Підставити вичитану суму у виплату: створює рядок виплати, якщо його ще
-// немає. Сума лягає у фікс — це та частина, яку підтверджує звіт; відсоток
-// і бонус рахуються окремо розрахунком ЗП і не затираються.
-export async function applyReport(id, override) {
+// Підставити вичитані суму й години у виплату: створює рядок виплати, якщо
+// його ще немає. Сума лягає у фікс — це та частина, яку підтверджує звіт;
+// відсоток і бонус рахуються окремо розрахунком ЗП і не затираються. Години
+// не обовʼязкові: звіт може нести лише гроші, лише час, або й те, й те.
+export async function applyReport(id, overrides = {}) {
   const row = await getReport(id);
-  // override — виправлена людиною сума: ШІ міг прочитати не ту цифру, і
-  // тоді правильніше вбити свою, ніж лишати виплату порожньою.
-  const raw = override === undefined || override === null || override === '' ? row.ai_amount : override;
-  if (raw === null || raw === undefined) {
+  // override — виправлена людиною цифра: ШІ міг прочитати не ту суму чи
+  // не ті години, і тоді правильніше вбити свою, ніж лишати поле порожнім.
+  const amountRaw = overrides.amount === undefined || overrides.amount === null || overrides.amount === ''
+    ? row.ai_amount : overrides.amount;
+  if (amountRaw === null || amountRaw === undefined) {
     throw Object.assign(new Error('У звіті немає суми, яку можна підставити'), { status: 400 });
   }
-  const amount = Number(raw);
+  const amount = Number(amountRaw);
   if (!Number.isFinite(amount)) throw Object.assign(new Error('Сума має бути числом'), { status: 400 });
+
+  const hoursRaw = overrides.hours === undefined || overrides.hours === null || overrides.hours === ''
+    ? row.ai_hours : overrides.hours;
+  const hasHours = hoursRaw !== null && hoursRaw !== undefined;
+  const hours = hasHours ? Number(hoursRaw) : null;
+  if (hasHours && !Number.isFinite(hours)) throw Object.assign(new Error('Час має бути числом'), { status: 400 });
+
   const existing = await get('SELECT * FROM payouts WHERE user_id=? AND period=?', row.user_id, row.period);
+  const finalHours = hasHours ? hours : Number(existing?.hours || 0);
   if (existing) {
     const total = amount + Number(existing.percent_amount || 0) + Number(existing.bonus_amount || 0);
-    await run('UPDATE payouts SET fix_amount=?, total=? WHERE id=?', amount, total, existing.id);
+    await run('UPDATE payouts SET fix_amount=?, total=?, hours=? WHERE id=?', amount, total, finalHours, existing.id);
   } else {
     await insert('payouts', {
-      user_id: row.user_id, period: row.period, fix_amount: amount,
+      user_id: row.user_id, period: row.period, fix_amount: amount, hours: finalHours,
       percent_amount: 0, bonus_amount: 0, total: amount, status: 'accrued',
       note: `Із звіту: ${row.file_name}`,
     });
   }
   await run(`UPDATE payout_reports SET applied_at=datetime('now') WHERE id=?`, Number(id));
-  return { ok: true, amount, period: row.period, user_id: row.user_id };
+  return { ok: true, amount, hours: finalHours, period: row.period, user_id: row.user_id };
+}
+
+// ── Час і гроші однієї людини за довільний проміжок ────────────────────
+// «Обрати тільки годину/гроші конкретної людини за конкретний період» —
+// сума й години з підтверджених виплат (payouts), а не з сирих звітів:
+// звіт міг прийти з чужою цифрою, яку ще не підтвердили.
+export async function personRange(user, { userId, from, to }) {
+  assertPeriod(from);
+  assertPeriod(to);
+  const [start, end] = from <= to ? [from, to] : [to, from];
+
+  const id = Number(userId);
+  const ids = await visibleUserIds(user);
+  if (!ids.includes(id)) throw Object.assign(new Error('Немає доступу до цього співробітника'), { status: 404 });
+  const target = await get('SELECT id, name, role FROM users WHERE id=?', id);
+  if (!target) throw Object.assign(new Error('Співробітника не знайдено'), { status: 404 });
+
+  const rows = await all(
+    `SELECT period, fix_amount, percent_amount, bonus_amount, total, hours, status
+       FROM payouts WHERE user_id=? AND period>=? AND period<=? AND status<>'canceled'
+       ORDER BY period`, id, start, end);
+  const reportsCount = Number((await get(
+    `SELECT COUNT(*) AS c FROM payout_reports WHERE user_id=? AND period>=? AND period<=?`,
+    id, start, end))?.c || 0);
+
+  return {
+    user_id: target.id, user_name: target.name, role: target.role, from: start, to: end,
+    money: rows.reduce((sum, r) => sum + Number(r.total || 0), 0),
+    hours: rows.reduce((sum, r) => sum + Number(r.hours || 0), 0),
+    months: rows.length,
+    reports: reportsCount,
+    rows,
+  };
+}
+
+// Список людей, чиї виплати доступні цьому користувачу за скоупом ролі —
+// для випадаючого списку у формі «людина + період».
+export async function visiblePeople(user) {
+  const ids = await visibleUserIds(user);
+  if (!ids.length) return [];
+  return all(`SELECT id, name, role FROM users WHERE id IN (${ids.map(() => '?').join(',')}) ORDER BY name`, ...ids);
 }

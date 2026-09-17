@@ -331,15 +331,15 @@ async function seedDemo() {
     return d.toISOString().slice(0, 7);
   };
   const payoutPlan = [
-    [0, [[salesUser.id, 900, 240, 100], [users[6].id, 700, 0, 60]]],
-    [1, [[salesUser.id, 900, 310, 0], [users[6].id, 700, 0, 120]]],
-    [2, [[salesUser.id, 850, 180, 0], [users[6].id, 650, 0, 0]]],
+    [0, [[salesUser.id, 900, 240, 100, 168], [users[6].id, 700, 0, 60, 152]]],
+    [1, [[salesUser.id, 900, 310, 0, 172], [users[6].id, 700, 0, 120, 160]]],
+    [2, [[salesUser.id, 850, 180, 0, 164], [users[6].id, 650, 0, 0, 148]]],
   ];
   for (const [back, rows] of payoutPlan) {
-    for (const [userId, fix, percent, bonus] of rows) {
+    for (const [userId, fix, percent, bonus, hours] of rows) {
       await insert('payouts', {
         user_id: userId, period: payoutPeriod(back), fix_amount: fix, percent_amount: percent,
-        bonus_amount: bonus, total: fix + percent + bonus,
+        bonus_amount: bonus, total: fix + percent + bonus, hours,
         status: back === 0 ? 'accrued' : 'paid',
         paid_at: back === 0 ? null : `${payoutPeriod(back)}-28`,
       });

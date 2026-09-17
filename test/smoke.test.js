@@ -1451,3 +1451,75 @@ test('завеликий файл не приймається', async () => {
   });
   assert.equal(res.status, 413, 'база не місце для стомегабайтних вкладень');
 });
+
+// ── Час команди у виплатах: години зі звіту й пошук за людиною/періодом ──
+test('огляд і зведення виплат несуть години поряд із грошима', async () => {
+  const overview = (await call('/api/payouts/overview')).data;
+  const current = overview.years.flatMap((y) => y.months).find((m) => m.period === thisPeriod());
+  assert.ok(current.hours > 0, 'демо-виплати цього місяця мають години');
+  assert.equal(overview.summary.month_hours, current.hours);
+  assert.ok(overview.summary.quarter_hours >= overview.summary.month_hours, 'три місяці не менші за один');
+});
+
+test('підстановка звіту може нести і суму, і години одночасно', async () => {
+  const period = thisPeriod();
+  const target = (await call(`/api/payouts/period/${period}`)).data.rows.find((r) => !r.payout);
+  const rep = (await call('/api/payouts/reports', {
+    method: 'POST', body: { user_id: target.user_id, period, file_name: 'час.pdf', content: PDF_BASE64 },
+  })).data.row;
+
+  const applied = await call(`/api/payouts/reports/${rep.id}/apply`, {
+    method: 'POST', body: { amount: 400, hours: 96 },
+  });
+  assert.equal(applied.status, 200, JSON.stringify(applied.data));
+  assert.equal(applied.data.hours, 96);
+
+  const row = (await call(`/api/payouts/period/${period}`)).data.rows
+    .find((r) => Number(r.user_id) === Number(target.user_id));
+  assert.equal(Number(row.payout.hours), 96);
+  assert.equal(Number(row.payout.total), 400, 'години не впливають на грошове «разом»');
+});
+
+test('підстановка без годин лишає вже наявні години недоторканими', async () => {
+  const period = thisPeriod();
+  const target = (await call(`/api/payouts/period/${period}`)).data.rows.find((r) => Number(r.payout?.hours) > 0);
+  const before = Number(target.payout.hours);
+
+  const rep = (await call('/api/payouts/reports', {
+    method: 'POST', body: { user_id: target.user_id, period, file_name: 'без-годин.pdf', content: PDF_BASE64 },
+  })).data.row;
+  await call(`/api/payouts/reports/${rep.id}/apply`, { method: 'POST', body: { amount: 111 } });
+
+  const after = (await call(`/api/payouts/period/${period}`)).data.rows
+    .find((r) => Number(r.user_id) === Number(target.user_id));
+  assert.equal(Number(after.payout.hours), before, 'години не затерто нулем');
+  assert.equal(Number(after.payout.fix_amount), 111);
+});
+
+test('список людей для пошуку відповідає скоупу ролі', async () => {
+  const owner = await call('/api/payouts/people');
+  assert.equal(owner.status, 200);
+  assert.ok(owner.data.rows.length >= 3, 'власник бачить усю команду');
+
+  const creator = await call('/api/payouts/people', { as: 'creator' });
+  assert.equal(creator.status, 200);
+  assert.equal(creator.data.rows.length, 1, 'крієйтор бачить лише себе');
+});
+
+test('час і гроші однієї людини рахуються за довільний проміжок місяців', async () => {
+  const period = thisPeriod();
+  const months = (await call('/api/payouts/overview')).data.years[0].months.map((m) => m.period).sort();
+  const from = months[0];
+  const to = months[months.length - 1];
+  const withHours = (await call(`/api/payouts/period/${period}`)).data.rows.find((r) => Number(r.payout?.hours) > 0);
+
+  const range = await call(`/api/payouts/range?user_id=${withHours.user_id}&from=${from}&to=${to}`);
+  assert.equal(range.status, 200, JSON.stringify(range.data));
+  assert.ok(range.data.money > 0);
+  assert.ok(range.data.hours > 0);
+  assert.equal(range.data.rows.length, range.data.months);
+
+  assert.equal((await call('/api/payouts/range')).status, 400, 'бракує параметрів');
+  const denied = await call(`/api/payouts/range?user_id=${withHours.user_id}&from=${from}&to=${to}`, { as: 'creator' });
+  assert.equal(denied.status, 404, 'чужа людина недоступна за скоупом');
+});

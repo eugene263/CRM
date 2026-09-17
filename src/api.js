@@ -586,7 +586,7 @@ export async function handleApi(req, res, url) {
   // ── Виплати команді: роки → місяці → люди → PDF-звіти ─────────────────
   // Іменовані підшляхи мусять стояти перед генерик-CRUD: там seg[1] —
   // це id запису, і /payouts/overview інакше пішло б у нього як «запис #NaN».
-  if (seg[0] === 'payouts' && ['overview', 'summary', 'period', 'reports'].includes(seg[1])) {
+  if (seg[0] === 'payouts' && ['overview', 'summary', 'period', 'reports', 'people', 'range'].includes(seg[1])) {
     if (!can(user, 'payouts', 'read')) return fail(res, 403, 'Немає доступу до виплат');
 
     if (seg[1] === 'overview' && req.method === 'GET') {
@@ -595,6 +595,17 @@ export async function handleApi(req, res, url) {
     if (seg[1] === 'summary' && req.method === 'GET') return ok(res, await payouts.summary(user));
     if (seg[1] === 'period' && seg[2] && req.method === 'GET') {
       return ok(res, { period: seg[2], rows: await payouts.periodRows(user, seg[2]) });
+    }
+    if (seg[1] === 'people' && req.method === 'GET') {
+      return ok(res, { rows: await payouts.visiblePeople(user) });
+    }
+    // /api/payouts/range?user_id=&from=YYYY-MM&to=YYYY-MM — час і гроші
+    // однієї людини за довільний проміжок.
+    if (seg[1] === 'range' && req.method === 'GET') {
+      if (!query.user_id || !query.from || !query.to) {
+        return fail(res, 400, 'Потрібні user_id, from і to');
+      }
+      return ok(res, await payouts.personRange(user, { userId: query.user_id, from: query.from, to: query.to }));
     }
 
     if (seg[1] === 'reports') {
@@ -642,7 +653,8 @@ export async function handleApi(req, res, url) {
       if (seg[2] && seg[3] === 'apply' && req.method === 'POST') {
         if (!can(user, 'payouts', 'update')) return fail(res, 403, 'Немає прав редагувати виплати');
         await guard(reportId);
-        const applied = await payouts.applyReport(reportId, (await readBody(req)).amount);
+        const applyBody = await readBody(req);
+        const applied = await payouts.applyReport(reportId, { amount: applyBody.amount, hours: applyBody.hours });
         await audit({ user_id: user.id, action: 'payout_report_apply', entity: 'payouts', entity_id: reportId,
           payload: applied, ip });
         return ok(res, applied);

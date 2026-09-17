@@ -318,6 +318,7 @@ CREATE TABLE IF NOT EXISTS payouts (
   percent_amount REAL NOT NULL DEFAULT 0,
   bonus_amount REAL NOT NULL DEFAULT 0,
   total REAL NOT NULL DEFAULT 0,
+  hours REAL NOT NULL DEFAULT 0,           -- підтверджені години зі звіту за місяць
   currency TEXT NOT NULL DEFAULT 'USD',
   status TEXT NOT NULL DEFAULT 'accrued',  -- accrued|paid|canceled
   paid_at TEXT,
@@ -342,6 +343,7 @@ CREATE TABLE IF NOT EXISTS payout_reports (
   ai_amount REAL,
   ai_currency TEXT,
   ai_period TEXT,
+  ai_hours REAL,
   ai_summary TEXT,
   ai_error TEXT,
   applied_at TEXT,

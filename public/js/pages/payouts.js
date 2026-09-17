@@ -16,6 +16,8 @@ const periodLabel = (period) => {
 const MAX_MB = 8;
 
 const fileSize = (bytes) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} МБ` : `${Math.max(1, Math.round(bytes / 1024))} КБ`);
+const hrs = (v) => (v === null || v === undefined ? '—' : `${num(v)} год`);
+const currentPeriod = () => new Date().toISOString().slice(0, 7);
 
 // FileReader віддає data-URL; серверу потрібен лише base64 після коми.
 function readAsBase64(file) {
@@ -43,8 +45,50 @@ export async function renderPayouts() {
     localStorage.setItem(YEAR_KEY, String(pickedYear));
 
     box.textContent = '';
-    box.append(tiles(summary), yearTabs(years));
+    box.append(tiles(summary), el('div', { class: 'row', style: 'margin-bottom:16px;align-items:center' },
+      yearTabs(years),
+      el('div', { style: 'flex:1 1 auto;display:flex;justify-content:flex-end' },
+        el('button', { class: 'btn', onclick: () => personRangeModal() },
+          withIcon('search', 'Час і гроші однієї людини')))));
     box.append(pickedPeriod ? await monthCard(pickedPeriod) : monthsGrid(years));
+  }
+
+  // ── Час і гроші конкретної людини за довільний проміжок ────────────────
+  // Окремо від таблиці місяця: тут можна порахувати, скільки людина
+  // заробила й відпрацювала за будь-який діапазон місяців, а не лише за один.
+  async function personRangeModal() {
+    const { rows: people } = await api.get('/payouts/people');
+    if (!people.length) return toast('Немає людей, чиї виплати вам видно', true);
+
+    const personSel = el('select', {}, ...people.map((p) => el('option', { value: p.id }, p.name)));
+    const from = el('input', { type: 'month', value: currentPeriod() });
+    const to = el('input', { type: 'month', value: currentPeriod() });
+    const result = el('div', { style: 'margin-top:14px' });
+
+    const form = el('div', {},
+      el('div', { class: 'field' }, el('label', {}, 'Співробітник'), personSel),
+      el('div', { class: 'row' },
+        el('div', {}, el('label', {}, 'З місяця'), from),
+        el('div', {}, el('label', {}, 'По місяць'), to)),
+      result);
+
+    const runBtn = actionButton('Порахувати', async () => {
+      if (!from.value || !to.value) return toast('Вкажіть обидва місяці', true);
+      try {
+        const data = await api.get(`/payouts/range?user_id=${personSel.value}&from=${from.value}&to=${to.value}`);
+        result.textContent = '';
+        result.append(el('div', { class: 'tiles' },
+          el('div', { class: 'tile' }, el('div', { class: 'label' }, 'Гроші за період'), el('div', { class: 'value' }, money(data.money))),
+          el('div', { class: 'tile' }, el('div', { class: 'label' }, 'Час за період'), el('div', { class: 'value' }, hrs(data.hours))),
+          el('div', { class: 'tile' }, el('div', { class: 'label' }, 'Місяців із нарахуванням'), el('div', { class: 'value' }, num(data.months)))),
+          data.rows.length ? el('div', { class: 'table-wrap', style: 'margin-top:10px' }, el('table', {},
+            el('thead', {}, el('tr', {}, el('th', {}, 'Місяць'), el('th', {}, 'Разом'), el('th', {}, 'Год'))),
+            el('tbody', {}, ...data.rows.map((r) => el('tr', {},
+              el('td', {}, periodLabel(r.period)), el('td', {}, money(r.total)), el('td', {}, hrs(r.hours))))))) : null);
+      } catch (e) { toast(e.message, true); }
+    }, { className: 'btn primary' });
+
+    modal('Час і гроші однієї людини', form, [runBtn]);
   }
 
   // ── Міні-дашборд ──────────────────────────────────────────────────────
@@ -63,6 +107,7 @@ export async function renderPayouts() {
       tile('За 3 місяці', money(s.quarter_total), `з ${s.quarter_from} · у середньому ${money(s.avg_month)}/міс`),
       tile('Ще не виплачено', money(s.unpaid_total), `нарахувань: ${num(s.unpaid_count)}`,
         s.unpaid_total > 0 ? 'neg' : 'pos'),
+      tile('Час команди за місяць', hrs(s.month_hours), `за 3 місяці: ${hrs(s.quarter_hours)}`),
       tile('Звіти за місяць', `${num(s.reported_people)} / ${num(s.team_size)}`,
         s.team_size > s.reported_people ? `без звіту: ${s.team_size - s.reported_people}` : 'усі здали'));
   }
@@ -107,13 +152,14 @@ export async function renderPayouts() {
     const table = el('table', {},
       el('thead', {}, el('tr', {},
         el('th', {}, 'Співробітник'), el('th', {}, 'Фікс'), el('th', {}, '%'),
-        el('th', {}, 'Бонус'), el('th', {}, 'Разом'), el('th', {}, 'Статус'), el('th', {}, 'Звіти'))),
+        el('th', {}, 'Бонус'), el('th', {}, 'Разом'), el('th', {}, 'Год'), el('th', {}, 'Статус'), el('th', {}, 'Звіти'))),
       el('tbody', {}, ...rows.map((r) => el('tr', {},
         el('td', {}, el('b', {}, r.user_name)),
         el('td', {}, money(r.payout?.fix_amount)),
         el('td', {}, money(r.payout?.percent_amount)),
         el('td', {}, money(r.payout?.bonus_amount)),
         el('td', {}, el('b', {}, money(r.payout?.total))),
+        el('td', {}, r.payout?.hours ? hrs(r.payout.hours) : '—'),
         el('td', {}, r.payout ? badge(r.payout.status, {
           accrued: 'Нараховано', paid: 'Виплачено', canceled: 'Скасовано',
         }[r.payout.status] || r.payout.status) : el('span', { class: 'muted' }, '—')),
@@ -206,6 +252,7 @@ export async function renderPayouts() {
         ? el('div', { class: 'error', style: 'margin-top:10px' }, rep.ai_error || 'ШІ не зміг прочитати звіт')
         : el('div', { style: 'margin-top:10px' },
           line('Сума зі звіту', rep.ai_amount != null ? `${money(rep.ai_amount)}${rep.ai_currency ? ` ${rep.ai_currency}` : ''}` : '— (у звіті не знайдено)'),
+          line('Час зі звіту', hrs(rep.ai_hours)),
           rep.ai_period && rep.ai_period !== rep.period
             ? el('div', { class: 'muted', style: 'font-size:12.5px;margin-bottom:6px' },
               `У документі вказано інший період: ${rep.ai_period}`) : null,
@@ -215,20 +262,25 @@ export async function renderPayouts() {
       el('div', { class: 'muted', style: 'margin-top:10px;font-size:11.5px' },
         'ШІ читає PDF і пропонує суму — у виплату вона потрапляє лише після вашого підтвердження.'));
 
-    // Суму можна виправити перед підстановкою: ШІ міг взяти не ту цифру,
-    // а лишати виплату порожньою через це — гірше.
+    // Суму й години можна виправити перед підстановкою: ШІ міг взяти не ту
+    // цифру, а лишати поле порожнім через це — гірше.
     const amountInput = el('input', { type: 'number', step: '0.01', style: 'max-width:160px',
       value: rep.ai_amount != null ? rep.ai_amount : '' });
+    const hoursInput = el('input', { type: 'number', step: '0.1', style: 'max-width:160px',
+      value: rep.ai_hours != null ? rep.ai_hours : '' });
     const actions = [];
     if (canEdit) {
-      content.append(el('div', { class: 'field', style: 'margin-top:12px' },
-        el('label', {}, 'Сума у виплату, $'), amountInput));
+      content.append(el('div', { class: 'row', style: 'margin-top:12px' },
+        el('div', { class: 'field' }, el('label', {}, 'Сума у виплату, $'), amountInput),
+        el('div', { class: 'field' }, el('label', {}, 'Годин у виплату'), hoursInput)));
       actions.push(actionButton(rep.applied_at ? 'Підставити ще раз' : 'Підставити у виплату', async () => {
         if (amountInput.value === '') return toast('Вкажіть суму', true);
         try {
-          await api.post(`/payouts/reports/${rep.id}/apply`, { amount: amountInput.value });
+          const applied = await api.post(`/payouts/reports/${rep.id}/apply`, {
+            amount: amountInput.value, hours: hoursInput.value === '' ? null : hoursInput.value,
+          });
           modalBox.remove();
-          toast(`Фікс за ${periodLabel(rep.period)} оновлено: ${money(amountInput.value)}`);
+          toast(`Фікс за ${periodLabel(rep.period)} оновлено: ${money(applied.amount)}${applied.hours ? ` · ${hrs(applied.hours)}` : ''}`);
           await render();
         } catch (e) { toast(e.message, true); }
       }));
