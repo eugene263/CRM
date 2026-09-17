@@ -1,75 +1,64 @@
 // Собівартість послуг: із чого складається одиниця роботи, скільки вона
 // коштує насправді і яку ціну ставити, щоб вийти на цільову маржу.
 //
-// Ставки живуть окремо від послуг: підняли годину монтажера — перерахувались
-// усі послуги, де вона є, без ручного редагування кожної.
+// Ставки живуть усередині своєї послуги: одна послуга — свій власний перелік
+// ставок (код, назва, тип, одиниця, ставка, кількість). Спільного довідника
+// немає, тож та сама «Година монтажера» в різних послугах може коштувати
+// по-різному й нікуди більше не тягнеться.
 import { all, get, run, insert, update } from './db.js';
 
 const now = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 const round = (v) => Math.round(Number(v || 0) * 100) / 100;
 
-const DEFAULT_RATES = [
-  ['editor_hour', 'Година монтажера', 'labor', 'год', 8],
-  ['creator_hour', 'Година крієйтора', 'labor', 'год', 7],
-  ['manager_hour', 'Година менеджера', 'labor', 'год', 9],
-  ['account', 'Акаунт (закупка + фарм)', 'resource', 'шт', 12],
-  ['proxy_month', 'Проксі, місяць', 'resource', 'міс', 15],
-  ['sim', 'SIM-карта', 'resource', 'шт', 3],
-  ['ai_tools', 'AI-сервіси на одиницю', 'subscription', 'шт', 1.5],
-  ['overhead', 'Накладні витрати', 'overhead', '%', 15],
-];
-
+// Рядок накладних — це відсоток від прямих витрат, а не окрема сума, тому
+// в кожній демо-послузі він іде останнім із одиницею «%».
 const DEFAULT_SERVICES = [
   {
     name: 'Пакет Reels: 30 відео/міс', category: 'Контент', unit: 'пакет', target_margin: 55, price: 1200,
     volume_per_month: 4,
     items: [
-      ['editor_hour', 'Монтаж 30 роликів', 20],
-      ['creator_hour', 'Зйомка й сценарії', 14],
-      ['manager_hour', 'Комунікація з клієнтом', 4],
-      ['ai_tools', 'AI-озвучка та субтитри', 30],
+      ['editor_hour', 'Монтаж 30 роликів', 'labor', 'год', 20, 8],
+      ['creator_hour', 'Зйомка й сценарії', 'labor', 'год', 14, 7],
+      ['manager_hour', 'Комунікація з клієнтом', 'labor', 'год', 4, 9],
+      ['ai_tools', 'AI-озвучка та субтитри', 'subscription', 'шт', 30, 1.5],
+      ['overhead', 'Накладні витрати', 'overhead', '%', 1, 15],
     ],
   },
   {
     name: 'Ведення TikTok-акаунта, місяць', category: 'Контент', unit: 'місяць', target_margin: 50, price: 650,
     volume_per_month: 6,
     items: [
-      ['creator_hour', 'Ведення й публікації', 12],
-      ['editor_hour', 'Монтаж 12 відео', 8],
-      ['account', 'Акаунт із запасом на бан', 1],
-      ['proxy_month', 'Проксі', 1],
+      ['creator_hour', 'Ведення й публікації', 'labor', 'год', 12, 7],
+      ['editor_hour', 'Монтаж 12 відео', 'labor', 'год', 8, 8],
+      ['account', 'Акаунт із запасом на бан', 'resource', 'шт', 1, 12],
+      ['proxy_month', 'Проксі', 'resource', 'міс', 1, 15],
+      ['overhead', 'Накладні витрати', 'overhead', '%', 1, 15],
     ],
   },
   {
     name: 'Один рекламний ролик', category: 'Контент', unit: 'шт', target_margin: 60, price: 90,
     volume_per_month: 40,
     items: [
-      ['editor_hour', 'Монтаж', 2.5],
-      ['creator_hour', 'Зйомка', 1],
-      ['ai_tools', 'Сервіси', 1],
+      ['editor_hour', 'Монтаж', 'labor', 'год', 2.5, 8],
+      ['creator_hour', 'Зйомка', 'labor', 'год', 1, 7],
+      ['ai_tools', 'Сервіси', 'subscription', 'шт', 1, 1.5],
+      ['overhead', 'Накладні витрати', 'overhead', '%', 1, 15],
     ],
   },
 ];
 
 export async function seedCosting() {
-  if (!(await get('SELECT id FROM cost_rates LIMIT 1'))) {
-    for (const [code, name, kind, unit, amount] of DEFAULT_RATES) {
-      await insert('cost_rates', { code, name, kind, unit, amount });
-    }
-  }
-  if (!(await get('SELECT id FROM services LIMIT 1'))) {
-    for (const s of DEFAULT_SERVICES) {
-      const id = await insert('services', {
-        name: s.name, category: s.category, unit: s.unit, target_margin: s.target_margin,
-        price: s.price, volume_per_month: s.volume_per_month, status: 'active',
+  if (await get('SELECT id FROM services LIMIT 1')) return;
+  for (const s of DEFAULT_SERVICES) {
+    const id = await insert('services', {
+      name: s.name, category: s.category, unit: s.unit, target_margin: s.target_margin,
+      price: s.price, volume_per_month: s.volume_per_month, status: 'active',
+    });
+    for (const [i, [rate_code, name, kind, unit, quantity, unit_cost]] of s.items.entries()) {
+      await insert('service_cost_items', {
+        service_id: id, rate_code, name, kind, unit, quantity, unit_cost,
+        sort_order: (i + 1) * 10,
       });
-      for (const [i, [rate_code, name, quantity]] of s.items.entries()) {
-        const rate = await get('SELECT * FROM cost_rates WHERE code=?', rate_code);
-        await insert('service_cost_items', {
-          service_id: id, rate_code, name, kind: rate?.kind || 'labor',
-          quantity, sort_order: (i + 1) * 10,
-        });
-      }
     }
   }
 }
@@ -109,33 +98,24 @@ export async function fixedMonthlyCosts() {
   return { salary: round(salary), subscriptions: round(subscriptions), total: round(salary + subscriptions) };
 }
 
-async function rateMap() {
-  const rows = await all('SELECT * FROM cost_rates');
-  return Object.fromEntries(rows.map((r) => [r.code, r]));
-}
-
-export async function serviceCost(serviceId, rates = null) {
+export async function serviceCost(serviceId) {
   const service = await get('SELECT * FROM services WHERE id=?', serviceId);
   if (!service) throw Object.assign(new Error('Послугу не знайдено'), { status: 404 });
-  const map = rates || (await rateMap());
   const items = await all('SELECT * FROM service_cost_items WHERE service_id=? ORDER BY sort_order, id', serviceId);
 
-  const lines = items.map((item) => {
-    const rate = item.rate_code ? map[item.rate_code] : null;
-    const unitCost = item.unit_cost != null ? Number(item.unit_cost) : Number(rate?.amount || 0);
-    return {
-      ...item,
-      unit: rate?.unit || 'шт',
-      unit_cost: round(unitCost),
-      from_rate: item.unit_cost == null && !!rate,
-      total: round(Number(item.quantity) * unitCost),
-    };
-  });
+  const lines = items.map((item) => ({
+    ...item,
+    is_active: Number(item.is_active ?? 1),
+    unit_cost: round(item.unit_cost),
+    total: round(Number(item.quantity) * Number(item.unit_cost || 0)),
+  }));
 
-  const direct = round(lines.filter((l) => l.kind !== 'overhead').reduce((s, l) => s + l.total, 0));
-  // Накладні рахуємо відсотком від прямих витрат, а не окремим рядком —
-  // інакше при зміні складу послуги вони «застигають».
-  const overheadRate = Number(map.overhead?.amount || 0);
+  const active = lines.filter((l) => l.is_active);
+  const direct = round(active.filter((l) => l.kind !== 'overhead').reduce((s, l) => s + l.total, 0));
+  // Рядок типу «Накладні» — це відсоток від прямих витрат, а не власна сума:
+  // інакше при зміні складу послуги накладні «застигають».
+  const overheadRate = active.filter((l) => l.kind === 'overhead')
+    .reduce((s, l) => s + Number(l.unit_cost || 0), 0);
   const overhead = round(direct * (overheadRate / 100));
   const cost = round(direct + overhead);
 
@@ -157,11 +137,10 @@ export async function serviceCost(serviceId, rates = null) {
 }
 
 export async function listServices({ status = null } = {}) {
-  const rates = await rateMap();
   const services = await all(
     `SELECT id FROM services ${status ? 'WHERE status=?' : ''} ORDER BY id`, ...(status ? [status] : []));
   const rows = [];
-  for (const s of services) rows.push(await serviceCost(s.id, rates));
+  for (const s of services) rows.push(await serviceCost(s.id));
 
   const fixed = await fixedMonthlyCosts();
   const totalProfit = round(rows.reduce((sum, r) => sum + r.profit_per_month, 0));
@@ -191,8 +170,10 @@ export async function saveItem(serviceId, payload) {
     rate_code: payload.rate_code || null,
     name: String(payload.name || '').trim(),
     kind: payload.kind || 'labor',
+    unit: String(payload.unit || '').trim() || 'шт',
     quantity: Number(payload.quantity || 0),
-    unit_cost: payload.unit_cost === '' || payload.unit_cost == null ? null : Number(payload.unit_cost),
+    unit_cost: Number(payload.unit_cost || 0),
+    is_active: payload.is_active === undefined ? 1 : (Number(payload.is_active) ? 1 : 0),
     note: payload.note || null,
     sort_order: Number(payload.sort_order || 100),
   };

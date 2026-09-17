@@ -794,8 +794,9 @@ test('собівартість рахується зі ставок і накл�
   assert.ok(list.data.rows.length >= 3, 'демо-послуги на місці');
 
   const row = list.data.rows[0];
-  const sumOfLines = row.lines.reduce((s, l) => s + l.total, 0);
-  assert.equal(Math.round(sumOfLines * 100) / 100, row.direct, 'прямі = сума рядків');
+  // Рядок «Накладні» — це відсоток від решти, тож у прямі він не входить.
+  const sumOfLines = row.lines.filter((l) => l.kind !== 'overhead').reduce((s, l) => s + l.total, 0);
+  assert.equal(Math.round(sumOfLines * 100) / 100, row.direct, 'прямі = сума рядків, крім накладних');
   assert.equal(row.overhead, Math.round(row.direct * (row.overhead_percent / 100) * 100) / 100);
   assert.equal(row.cost, Math.round((row.direct + row.overhead) * 100) / 100);
 });
@@ -811,19 +812,39 @@ test('рекомендована ціна виводить на цільову �
   assert.ok(Math.abs(applied.data.margin_percent - margin) < 0.5, 'після підстановки маржа дорівнює цільовій');
 });
 
-test('зміна ставки перераховує всі послуги, де вона використана', async () => {
+test('ставка живе у своїй послузі: зміна не чіпає інші послуги', async () => {
   const before = (await call('/api/costing/services')).data.rows;
-  const rate = (await call('/api/cost_rates?code=editor_hour')).data.rows[0];
-  await call(`/api/cost_rates/${rate.id}`, { method: 'PUT', body: { amount: Number(rate.amount) + 10 } });
+  const mine = before.find((r) => r.lines.some((l) => l.rate_code === 'editor_hour'));
+  const other = before.find((r) => r.service.id !== mine.service.id);
+  const line = mine.lines.find((l) => l.rate_code === 'editor_hour');
+
+  const res = await call(`/api/costing/services/${mine.service.id}/items`, {
+    method: 'POST', body: { ...line, unit_cost: Number(line.unit_cost) + 10 },
+  });
+  assert.equal(res.status, 200);
+  assert.ok(res.data.cost > mine.cost, 'собівартість своєї послуги зросла');
 
   const after = (await call('/api/costing/services')).data.rows;
-  const affected = after.filter((r) => r.lines.some((l) => l.rate_code === 'editor_hour'));
-  assert.ok(affected.length >= 2, 'ставка використана в кількох послугах');
-  for (const row of affected) {
-    const old = before.find((b) => b.service.id === row.service.id);
-    assert.ok(row.cost > old.cost, `${row.service.name}: собівартість зросла`);
-  }
-  await call(`/api/cost_rates/${rate.id}`, { method: 'PUT', body: { amount: rate.amount } });
+  const otherAfter = after.find((r) => r.service.id === other.service.id);
+  assert.equal(otherAfter.cost, other.cost, 'сусідня послуга зі своєю ставкою не змінилась');
+
+  await call(`/api/costing/services/${mine.service.id}/items`, { method: 'POST', body: line });
+});
+
+test('неактивний рядок не йде в собівартість, накладні — відсоток від решти', async () => {
+  const { rows } = (await call('/api/costing/services')).data;
+  const row = rows.find((r) => r.lines.some((l) => l.kind === 'overhead'));
+  const overhead = row.lines.find((l) => l.kind === 'overhead');
+  assert.equal(row.overhead_percent, Number(overhead.unit_cost), 'відсоток накладних береться з рядка послуги');
+  assert.equal(row.overhead, Math.round(row.direct * (row.overhead_percent / 100) * 100) / 100);
+
+  const off = await call(`/api/costing/services/${row.service.id}/items`, {
+    method: 'POST', body: { ...overhead, is_active: 0 },
+  });
+  assert.equal(off.data.overhead, 0, 'вимкнений рядок накладних не додає нічого');
+  assert.equal(off.data.cost, off.data.direct);
+
+  await call(`/api/costing/services/${row.service.id}/items`, { method: 'POST', body: overhead });
 });
 
 test('рядок собівартості додається і видаляється', async () => {

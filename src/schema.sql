@@ -798,8 +798,9 @@ CREATE TABLE IF NOT EXISTS channel_limits (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_channel_account ON channel_limits(account_name, channel);
 
 -- ── Собівартість послуг ───────────────────────────────────────────────────
--- Ставки (година роботи, акаунт, проксі, підписка) окремо від послуг:
--- змінив ставку — перерахувались усі послуги, які її використовують.
+-- cost_rates — колишній спільний довідник ставок. Ставки переїхали всередину
+-- своєї послуги (service_cost_items), таблиця лишається лише як архів даних,
+-- що були до переїзду, і ніде в застосунку вже не читається.
 CREATE TABLE IF NOT EXISTS cost_rates (
   id INTEGER PRIMARY KEY,
   code TEXT NOT NULL UNIQUE,
@@ -829,14 +830,20 @@ CREATE TABLE IF NOT EXISTS services (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Ставки живуть усередині своєї послуги: одна послуга — свій власний перелік
+-- ставок (код, назва, тип, одиниця, ставка, кількість). Спільного довідника
+-- немає: та сама «Година монтажера» у різних послугах може коштувати
+-- по-різному й нікуди більше не тягнеться.
 CREATE TABLE IF NOT EXISTS service_cost_items (
   id INTEGER PRIMARY KEY,
   service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
-  rate_code TEXT,                          -- звʼязок зі ставкою або власна ціна
+  rate_code TEXT,                          -- код рядка в межах цієї послуги
   name TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'labor',
+  kind TEXT NOT NULL DEFAULT 'labor',      -- labor|resource|subscription|overhead
+  unit TEXT NOT NULL DEFAULT 'шт',         -- год|шт|міс|%
   quantity REAL NOT NULL DEFAULT 1,
-  unit_cost REAL,                          -- NULL → береться з cost_rates
+  unit_cost REAL NOT NULL DEFAULT 0,       -- ставка за одиницю; для overhead — відсоток
+  is_active INTEGER NOT NULL DEFAULT 1,    -- неактивний рядок не йде в собівартість
   note TEXT,
   sort_order INTEGER NOT NULL DEFAULT 0
 );

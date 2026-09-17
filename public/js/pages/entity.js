@@ -9,6 +9,7 @@ import { clientCardModal } from './clients.js';
 import { serviceCardModal } from './servicePackage.js';
 import { renderLeadsKanban } from './leadsKanban.js';
 import { renderProspectListsCards } from './prospectLists.js';
+import { renderCostRates } from './costRates.js';
 import { icon, withIcon } from '../icons.js';
 
 const PAGE = 50;
@@ -110,6 +111,9 @@ export function openForm(entKey, row, onSaved) {
 export async function renderEntity(entKey) {
   if (entKey === 'leads') return renderLeadsEntity();
   if (entKey === 'prospect_lists') return renderProspectListsCards();
+  // Ставки живуть усередині послуг, тож цей екран — не таблиця ставок,
+  // а список плашок: одна плашка = одна послуга зі своїми ставками.
+  if (entKey === 'cost_rates') return renderCostRates();
   return renderEntityTable(entKey);
 }
 
