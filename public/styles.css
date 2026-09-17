@@ -270,3 +270,27 @@ td.editable textarea { min-width: 220px; resize: vertical; }
   .main { height: auto; overflow: visible; }
   .content { overflow-y: visible; }
 }
+
+/* Текст шаблону в картці: моноширинний, з переносами — щоб {{змінні}}
+   і довгі рядки читались так само, як їх відправлять. */
+.template-body {
+  margin: 0; padding: 10px 12px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--line);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+}
+
+/* Вкладений PDF-звіт у таблиці виплат. Колір рамки — стан розбору ШІ:
+   зелений = суму вже підставлено, жовтий = прочитано, червоний = збій. */
+.report-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 7px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--bg); font-size: 12px; max-width: 260px;
+}
+.report-chip a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
+.report-chip b { font-size: 12px; }
+.report-chip button { opacity: .55; }
+.report-chip button:hover { opacity: 1; }
+.report-chip.ok { border-color: var(--accent-2); }
+.report-chip.warn { border-color: var(--accent); }
+.report-chip.err { border-color: var(--danger); }

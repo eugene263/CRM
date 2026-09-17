@@ -292,16 +292,59 @@ async function seedDemo() {
   await run(`UPDATE leads SET status_code='replied', touches_count=1, first_touch_at=?, last_touch_at=?, replied_at=? WHERE id=?`,
     `${day(4)} 09:30:00`, `${day(4)} 09:30:00`, `${day(3)} 18:05:00`, leadIds[3]);
 
+  // Шаблони — дерево карток: папка з описом і тегами, усередині неї —
+  // готові тексти. Так одразу видно, що картка може мати вкладення.
+  const outreachId = await insert('message_templates', {
+    name: 'Холодний аутріч', description: 'Перший дотик до бізнесу, який нас ще не знає. Мета — отримати відповідь, а не продати.',
+    tags: 'холодний, перший тач', sort_order: 10, created_by: salesUser.id, body: '',
+  });
   await insert('message_templates', {
-    name: 'IG DM — демо-ролик', channel: 'instagram_dm',
+    parent_id: outreachId, sort_order: 10,
+    name: 'IG DM — демо-ролик', description: 'Коли в профілі давно не було відео.',
+    tags: 'instagram, reels', channel: 'instagram_dm',
     body: 'Привіт, {{company}}! Побачили ваш профіль — {{days_since_post}} днів без відео. Зняли приклад Reels для вас, скинути?',
     variables: 'company, days_since_post', created_by: salesUser.id,
   });
   await insert('message_templates', {
-    name: 'Email — аудит', channel: 'email', subject: 'Коротко про ваш контент',
+    parent_id: outreachId, sort_order: 20,
+    name: 'Email — аудит', description: 'Довший захід для бізнесів із сайтом.',
+    tags: 'email, аудит', channel: 'email', subject: 'Коротко про ваш контент',
     body: 'Вітаю! Подивились соцмережі {{company}} у {{city}}. Підготували міні-аудит і приклад ролика.',
     variables: 'company, city', created_by: salesUser.id,
   });
+  const followUpId = await insert('message_templates', {
+    name: 'Дотиски', description: 'Що писати, коли відповіді немає або розмова зупинилась.',
+    tags: 'follow-up', sort_order: 20, created_by: salesUser.id, body: '',
+  });
+  await insert('message_templates', {
+    parent_id: followUpId, sort_order: 10,
+    name: 'Другий тач — без відповіді', tags: 'follow-up, день 3',
+    body: 'Привіт ще раз! Підняв повідомлення вгору — цікаво глянути приклад для {{company}}?',
+    variables: 'company', created_by: salesUser.id,
+  });
+
+  // Виплати за три місяці — щоб міні-дашборд одразу мав що показувати.
+  const payoutPeriod = (back) => {
+    const d = new Date();
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() - back);
+    return d.toISOString().slice(0, 7);
+  };
+  const payoutPlan = [
+    [0, [[salesUser.id, 900, 240, 100], [users[6].id, 700, 0, 60]]],
+    [1, [[salesUser.id, 900, 310, 0], [users[6].id, 700, 0, 120]]],
+    [2, [[salesUser.id, 850, 180, 0], [users[6].id, 650, 0, 0]]],
+  ];
+  for (const [back, rows] of payoutPlan) {
+    for (const [userId, fix, percent, bonus] of rows) {
+      await insert('payouts', {
+        user_id: userId, period: payoutPeriod(back), fix_amount: fix, percent_amount: percent,
+        bonus_amount: bonus, total: fix + percent + bonus,
+        status: back === 0 ? 'accrued' : 'paid',
+        paid_at: back === 0 ? null : `${payoutPeriod(back)}-28`,
+      });
+    }
+  }
 
   // Норми: денний і місячний план менеджера, ліміти акаунтів, рампап.
   const monthStart = `${new Date().toISOString().slice(0, 7)}-01`;

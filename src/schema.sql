@@ -326,6 +326,30 @@ CREATE TABLE IF NOT EXISTS payouts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payout_period ON payouts(user_id, period);
 
+-- PDF-звіти команди за місяць: файл лежить у базі (base64), бо диск
+-- контейнера на Railway живе лише до наступного деплою. Поля ai_* —
+-- те, що ШІ вичитав зі звіту; у виплату воно потрапляє лише після
+-- явного «Підставити», щоб цифри в дашборді лишались підтвердженими.
+CREATE TABLE IF NOT EXISTS payout_reports (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  period TEXT NOT NULL,                    -- YYYY-MM
+  file_name TEXT NOT NULL,
+  mime TEXT NOT NULL DEFAULT 'application/pdf',
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  content TEXT NOT NULL,                   -- base64
+  ai_status TEXT NOT NULL DEFAULT 'none',  -- none|ok|error
+  ai_amount REAL,
+  ai_currency TEXT,
+  ai_period TEXT,
+  ai_summary TEXT,
+  ai_error TEXT,
+  applied_at TEXT,
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_payout_reports_period ON payout_reports(period, user_id);
+
 CREATE TABLE IF NOT EXISTS kpi_targets (
   id INTEGER PRIMARY KEY,
   user_id INTEGER REFERENCES users(id),
@@ -577,17 +601,28 @@ CREATE TABLE IF NOT EXISTS lead_contacts (
 CREATE INDEX IF NOT EXISTS idx_contacts_lead ON lead_contacts(lead_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_value ON lead_contacts(kind, value);
 
+-- Шаблони повідомлень — дерево карток: parent_id тримає вкладення, і та
+-- сама картка може бути і «папкою» (має дітей), і готовим шаблоном (має
+-- текст). Заголовок/опис/теги — те, що видно на самій картці.
 CREATE TABLE IF NOT EXISTS message_templates (
   id INTEGER PRIMARY KEY,
+  parent_id INTEGER REFERENCES message_templates(id),
   name TEXT NOT NULL,
+  description TEXT,
+  tags TEXT,
   channel TEXT,
   subject TEXT,
-  body TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
   variables TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Індекс по parent_id створює міграція, а не цей файл: schema.sql
+-- виконується на кожному старті ще ДО міграцій, і на наявній базі
+-- колонки parent_id у цей момент ще немає — індекс поклав би застосунок.
+
 
 -- Шаблони скриптів: на відміну від message_templates (готовий текст
 -- повідомлення), скрипт — це послідовність кроків розмови плюс окремий

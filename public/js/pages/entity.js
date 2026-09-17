@@ -10,6 +10,8 @@ import { serviceCardModal } from './servicePackage.js';
 import { renderLeadsKanban } from './leadsKanban.js';
 import { renderProspectListsCards } from './prospectLists.js';
 import { renderCostRates } from './costRates.js';
+import { renderMessageTemplates } from './messageTemplates.js';
+import { renderPayouts } from './payouts.js';
 import { icon, withIcon } from '../icons.js';
 
 const PAGE = 50;
@@ -114,6 +116,11 @@ export async function renderEntity(entKey) {
   // Ставки живуть усередині послуг, тож цей екран — не таблиця ставок,
   // а список плашок: одна плашка = одна послуга зі своїми ставками.
   if (entKey === 'cost_rates') return renderCostRates();
+  // Шаблони — дерево карток, а не плоска таблиця: одна картка може лежати
+  // всередині іншої, скільки завгодно рівнів.
+  if (entKey === 'message_templates') return renderMessageTemplates();
+  // Виплати — рік → місяць → людина з PDF-звітами і міні-дашбордом.
+  if (entKey === 'payouts') return renderPayouts();
   return renderEntityTable(entKey);
 }
 

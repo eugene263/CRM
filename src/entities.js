@@ -425,12 +425,20 @@ export const entities = {
   },
   message_templates: {
     label: 'Шаблони повідомлень', group: 'Клієнти', icon: 'fileText', title: 'name',
+    defaultSort: 'sort_order ASC',
     fields: [
-      { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
+      { name: 'name', label: 'Заголовок', type: 'text', required: true, list: true },
+      { name: 'description', label: 'Опис', type: 'textarea', list: true },
+      { name: 'tags', label: 'Теги', type: 'text', list: true, hint: 'через кому: холодний, instagram, після демо' },
+      // Вкладеність карток. Тип number, а не ref: сутність посилається сама
+      // на себе, і випадаючий список довідників сюди не підходить —
+      // батька задає сама картка, всередині якої ти натиснув «Додати».
+      { name: 'parent_id', label: 'Усередині картки', type: 'number' },
       { name: 'channel', label: 'Канал', type: 'text', list: true },
       { name: 'subject', label: 'Тема (email)', type: 'text' },
-      { name: 'body', label: 'Текст', type: 'textarea', required: true },
+      { name: 'body', label: 'Текст повідомлення', type: 'textarea' },
       { name: 'variables', label: 'Змінні', type: 'text', hint: '{{company}}, {{followers}}, {{days_since_post}}' },
+      { name: 'sort_order', label: 'Порядок', type: 'number' },
       { name: 'is_active', label: 'Активний', type: 'number', list: true },
     ],
   },

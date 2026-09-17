@@ -1276,3 +1276,178 @@ test('генерик-імпорт CSV створює записи за підп�
     method: 'POST', as: 'finance', body: { csv: 'Бізнес\nТест\n' },
   })).status, 403, 'фінансист не має прав створювати лідів — і імпортувати теж');
 });
+
+// ── Шаблони повідомлень як дерево карток ──────────────────────────────────
+async function makeTemplateCard(name, parentId = null) {
+  const res = await call('/api/message_templates', {
+    method: 'POST',
+    body: { name, description: `опис ${name}`, tags: 'тег-а, тег-б', parent_id: parentId ?? '' },
+  });
+  assert.equal(res.status, 200, `картка ${name}: ${JSON.stringify(res.data)}`);
+  return res.data.row;
+}
+
+test('картка шаблону створюється без тексту — вона може бути просто розділом', async () => {
+  const card = await makeTemplateCard('Розділ без тексту');
+  assert.equal(card.body, '', 'текст порожній, а не NULL');
+  assert.equal(card.description, 'опис Розділ без тексту');
+  assert.equal(card.tags, 'тег-а, тег-б');
+  assert.equal(card.parent_id, null, 'картка верхнього рівня');
+});
+
+test('картку можна вкласти в картку, і вкладеність видно в списку', async () => {
+  const parent = await makeTemplateCard('Батьківська картка');
+  const child = await makeTemplateCard('Вкладена картка', parent.id);
+  const grand = await makeTemplateCard('Вкладена в другий рівень', child.id);
+  assert.equal(Number(child.parent_id), parent.id);
+  assert.equal(Number(grand.parent_id), child.id);
+
+  const { rows } = (await call('/api/message_templates?limit=500')).data;
+  const kids = rows.filter((r) => Number(r.parent_id) === parent.id);
+  assert.equal(kids.length, 1, 'у батька рівно одна безпосередня дитина');
+  assert.ok(rows.some((r) => Number(r.parent_id) === child.id), 'третій рівень теж зберігся');
+});
+
+test('картку з вкладеннями не видалити, порожню — можна', async () => {
+  const parent = await makeTemplateCard('Картка з дитиною');
+  const child = await makeTemplateCard('Дитина', parent.id);
+
+  const busy = await call(`/api/message_templates/${parent.id}`, { method: 'DELETE' });
+  assert.equal(busy.status, 409, 'видалення забрало б із собою всю гілку');
+  assert.match(busy.data.error, /вкладені картки \(1\)/);
+
+  assert.equal((await call(`/api/message_templates/${child.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await call(`/api/message_templates/${parent.id}`, { method: 'DELETE' })).status, 200);
+});
+
+test('картку не можна вкласти саму в себе чи у власну підкартку', async () => {
+  const parent = await makeTemplateCard('Корінь кільця');
+  const child = await makeTemplateCard('Гілка кільця', parent.id);
+
+  const self = await call(`/api/message_templates/${parent.id}`, { method: 'PUT', body: { parent_id: parent.id } });
+  assert.equal(self.status, 400);
+  const cycle = await call(`/api/message_templates/${parent.id}`, { method: 'PUT', body: { parent_id: child.id } });
+  assert.equal(cycle.status, 400, 'інакше гілка зникла б із дерева');
+});
+
+// ── Виплати команді: роки → місяці → PDF-звіти ────────────────────────────
+const PDF_BASE64 = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n').toString('base64');
+const thisPeriod = () => new Date().toISOString().slice(0, 7);
+
+test('огляд виплат групує місяці по роках і рахує суми', async () => {
+  const res = await call('/api/payouts/overview');
+  assert.equal(res.status, 200);
+  const { years, summary } = res.data;
+  assert.ok(years.length >= 1, 'демо-виплати дали хоча б один рік');
+  const months = years.flatMap((y) => y.months);
+  const current = months.find((m) => m.period === thisPeriod());
+  assert.ok(current, 'поточний місяць у дереві');
+  assert.equal(current.total, current.total, 'сума місяця — число');
+  assert.equal(summary.period, thisPeriod());
+  assert.equal(summary.month_total, current.total, 'тайл «поточний місяць» = сума цього місяця');
+  assert.ok(summary.quarter_total >= summary.month_total, 'три місяці не менші за один');
+});
+
+test('місяць віддає всіх видимих людей — навіть тих, у кого ще немає нарахування', async () => {
+  const res = await call(`/api/payouts/period/${thisPeriod()}`);
+  assert.equal(res.status, 200);
+  assert.ok(res.data.rows.length > 2, 'у списку вся команда, а не лише ті, кому нарахували');
+  assert.ok(res.data.rows.some((r) => r.payout === null), 'людина без виплати теж видно — по ній і зрозуміло, що звіту немає');
+  assert.equal((await call('/api/payouts/period/2026-13')).status, 400, 'кривий період відхиляється');
+});
+
+test('PDF-звіт вкладається до людини в місяці, віддається файлом і видаляється', async () => {
+  const period = thisPeriod();
+  const target = (await call(`/api/payouts/period/${period}`)).data.rows[0];
+
+  const created = await call('/api/payouts/reports', {
+    method: 'POST',
+    body: { user_id: target.user_id, period, file_name: 'звіт.pdf', content: PDF_BASE64 },
+  });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  const report = created.data.row;
+  assert.equal(report.ai_status, 'none', 'щойно завантажений звіт ще не читали');
+  assert.ok(report.size_bytes > 0);
+  assert.ok(!('content' in report), 'base64 файла не їздить у списках');
+
+  const inPeriod = (await call(`/api/payouts/period/${period}`)).data.rows
+    .find((r) => Number(r.user_id) === Number(target.user_id));
+  assert.equal(inPeriod.reports.length, 1);
+
+  const file = await fetch(`${BASE}/api/payouts/reports/${report.id}/file`, { headers: { cookie: jar.owner } });
+  assert.equal(file.status, 200);
+  assert.equal(file.headers.get('content-type'), 'application/pdf');
+  assert.equal(Buffer.from(await file.arrayBuffer()).toString('base64'), PDF_BASE64, 'віддається той самий файл');
+
+  assert.equal((await call(`/api/payouts/reports/${report.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await call(`/api/payouts/reports/${report.id}/file`)).status, 404);
+});
+
+test('сума зі звіту підставляється у виплату: рядок створюється або оновлюється, разом перераховується', async () => {
+  const period = thisPeriod();
+  const rows = (await call(`/api/payouts/period/${period}`)).data.rows;
+  const withPayout = rows.find((r) => r.payout);
+  const withoutPayout = rows.find((r) => !r.payout);
+
+  // Людина, якій уже нарахували: фікс заміняється, відсоток і бонус лишаються.
+  const repA = (await call('/api/payouts/reports', {
+    method: 'POST', body: { user_id: withPayout.user_id, period, file_name: 'a.pdf', content: PDF_BASE64 },
+  })).data.row;
+  const applied = await call(`/api/payouts/reports/${repA.id}/apply`, { method: 'POST', body: { amount: 1234.5 } });
+  assert.equal(applied.status, 200, JSON.stringify(applied.data));
+
+  const after = (await call(`/api/payouts/period/${period}`)).data.rows
+    .find((r) => Number(r.user_id) === Number(withPayout.user_id));
+  assert.equal(Number(after.payout.fix_amount), 1234.5);
+  assert.equal(Number(after.payout.percent_amount), Number(withPayout.payout.percent_amount), 'відсоток не затерто');
+  assert.equal(Number(after.payout.total),
+    1234.5 + Number(withPayout.payout.percent_amount) + Number(withPayout.payout.bonus_amount),
+    'разом перераховано');
+  assert.ok(after.reports[0].applied_at, 'звіт позначений як підставлений');
+
+  // Людина без нарахування: рядок виплати створюється з нуля.
+  const repB = (await call('/api/payouts/reports', {
+    method: 'POST', body: { user_id: withoutPayout.user_id, period, file_name: 'b.pdf', content: PDF_BASE64 },
+  })).data.row;
+  assert.equal((await call(`/api/payouts/reports/${repB.id}/apply`, { method: 'POST', body: { amount: 500 } })).status, 200);
+  const createdRow = (await call(`/api/payouts/period/${period}`)).data.rows
+    .find((r) => Number(r.user_id) === Number(withoutPayout.user_id));
+  assert.equal(Number(createdRow.payout.total), 500);
+  assert.equal(createdRow.payout.status, 'accrued');
+});
+
+test('звіт без прочитаної суми не підставляється мовчки', async () => {
+  const period = thisPeriod();
+  const target = (await call(`/api/payouts/period/${period}`)).data.rows[0];
+  const rep = (await call('/api/payouts/reports', {
+    method: 'POST', body: { user_id: target.user_id, period, file_name: 'порожній.pdf', content: PDF_BASE64 },
+  })).data.row;
+  const res = await call(`/api/payouts/reports/${rep.id}/apply`, { method: 'POST', body: {} });
+  assert.equal(res.status, 400);
+  assert.match(res.data.error, /немає суми/i);
+});
+
+test('крієйтор бачить у виплатах лише себе і не лізе в чужі звіти', async () => {
+  const period = thisPeriod();
+  const mine = await call(`/api/payouts/period/${period}`, { as: 'creator' });
+  assert.equal(mine.status, 200);
+  assert.equal(mine.data.rows.length, 1, 'у власному скоупі видно тільки себе');
+
+  const foreign = (await call(`/api/payouts/period/${period}`)).data.rows
+    .find((r) => Number(r.user_id) !== Number(mine.data.rows[0].user_id));
+  const denied = await call('/api/payouts/reports', {
+    method: 'POST', as: 'creator',
+    body: { user_id: foreign.user_id, period, file_name: 'чужий.pdf', content: PDF_BASE64 },
+  });
+  assert.ok(denied.status === 403 || denied.status === 404, `чужий звіт відхилено (${denied.status})`);
+});
+
+test('завеликий файл не приймається', async () => {
+  const period = thisPeriod();
+  const target = (await call(`/api/payouts/period/${period}`)).data.rows[0];
+  const huge = 'A'.repeat(9 * 1024 * 1024 * 4 / 3);
+  const res = await call('/api/payouts/reports', {
+    method: 'POST', body: { user_id: target.user_id, period, file_name: 'товстий.pdf', content: huge },
+  });
+  assert.equal(res.status, 413, 'база не місце для стомегабайтних вкладень');
+});

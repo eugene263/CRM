@@ -99,6 +99,30 @@ const migrations = [
       }
     },
   },
+  {
+    // Шаблони повідомлень стали деревом карток: parent_id + заголовок/опис/
+    // теги. Наявні шаблони лишаються там, де були, — у корені (parent_id
+    // порожній), тож із очей нічого не зникає.
+    id: '2026-09-22-template-tree',
+    async up() {
+      const cols = await columnsOf('message_templates');
+      for (const [name, type] of [
+        ['parent_id', 'INTEGER'], ['description', 'TEXT'], ['tags', 'TEXT'],
+        ['sort_order', 'INTEGER NOT NULL DEFAULT 0'],
+      ]) {
+        if (!cols.has(name)) await run(`ALTER TABLE message_templates ADD COLUMN ${name} ${type}`);
+      }
+      await run('CREATE INDEX IF NOT EXISTS ix_templates_parent ON message_templates(parent_id)');
+    },
+  },
+  {
+    // payout_reports створює сам schema.sql (CREATE TABLE IF NOT EXISTS) —
+    // тут лишається тільки індекс під вибірку «звіти за місяць».
+    id: '2026-09-23-payout-reports',
+    async up() {
+      await run('CREATE INDEX IF NOT EXISTS ix_payout_reports_period ON payout_reports(period, user_id)');
+    },
+  },
 ];
 
 export async function migrate() {

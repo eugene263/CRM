@@ -11,6 +11,7 @@ import * as prospecting from './prospecting.js';
 import * as aiAssistant from './aiAssistant.js';
 import * as kpi from './kpi.js';
 import * as costing from './costing.js';
+import * as payouts from './payouts.js';
 import * as scripts from './scripts.js';
 import * as clients from './clients.js';
 import { encrypt, decrypt, token, hashIp } from './crypto.js';
@@ -89,6 +90,36 @@ function enforceScopeOnWrite(user, entKey, data, { isCreate }) {
 
 // ── Побічні ефекти конкретних сутностей ───────────────────────────────────
 const hooks = {
+  message_templates: {
+    // Картка-шаблон може лежати всередині іншої картки. Перевіряємо дві
+    // речі: батько існує і ми не заганяємо гілку саму в себе (інакше
+    // вкладення замкнулось би в кільце й картка зникла б з дерева).
+    async beforeWrite(user, data, body, { isCreate, current }) {
+      if (data.body === null || data.body === undefined) {
+        if (isCreate) data.body = '';                       // текст необовʼязковий: картка може бути просто папкою
+        else delete data.body;
+      }
+      if (isCreate && data.sort_order == null) data.sort_order = 0;
+      if (data.parent_id != null) {
+        const parentId = Number(data.parent_id);
+        if (current && parentId === Number(current.id)) {
+          throw Object.assign(new Error('Картку не можна покласти саму в себе'), { status: 400 });
+        }
+        if (!await get('SELECT id FROM message_templates WHERE id=?', parentId)) {
+          throw Object.assign(new Error('Батьківської картки не існує'), { status: 400 });
+        }
+        if (current) {
+          for (let id = parentId, hops = 0; id && hops < 50; hops += 1) {
+            if (Number(id) === Number(current.id)) {
+              throw Object.assign(new Error('Картку не можна вкласти у власну підкартку'), { status: 400 });
+            }
+            id = (await get('SELECT parent_id FROM message_templates WHERE id=?', id))?.parent_id;
+          }
+        }
+      }
+      return data;
+    },
+  },
   users: {
     async beforeWrite(user, data, body, { isCreate, current }) {
       if (body.password) {
@@ -552,6 +583,81 @@ export async function handleApi(req, res, url) {
   // Сам /api/scripts (список/створення/редагування назви, категорії, каналу)
   // іде через генерик-CRUD нижче — тут лише вкладені кроки, яких у генеричній
   // сутності немає.
+  // ── Виплати команді: роки → місяці → люди → PDF-звіти ─────────────────
+  // Іменовані підшляхи мусять стояти перед генерик-CRUD: там seg[1] —
+  // це id запису, і /payouts/overview інакше пішло б у нього як «запис #NaN».
+  if (seg[0] === 'payouts' && ['overview', 'summary', 'period', 'reports'].includes(seg[1])) {
+    if (!can(user, 'payouts', 'read')) return fail(res, 403, 'Немає доступу до виплат');
+
+    if (seg[1] === 'overview' && req.method === 'GET') {
+      return ok(res, { years: await payouts.overview(user), summary: await payouts.summary(user) });
+    }
+    if (seg[1] === 'summary' && req.method === 'GET') return ok(res, await payouts.summary(user));
+    if (seg[1] === 'period' && seg[2] && req.method === 'GET') {
+      return ok(res, { period: seg[2], rows: await payouts.periodRows(user, seg[2]) });
+    }
+
+    if (seg[1] === 'reports') {
+      // Видимість звіту = видимість виплат тієї людини: свої бачить кожен,
+      // чужі — лише роль зі скоупом на команду чи на всіх.
+      const guard = async (reportId) => {
+        const row = await payouts.reportOwner(reportId);
+        if (!row) throw Object.assign(new Error('Звіт не знайдено'), { status: 404 });
+        const mine = await payouts.periodRows(user, row.period);
+        if (!mine.some((r) => Number(r.user_id) === Number(row.user_id))) {
+          throw Object.assign(new Error('Звіт не знайдено'), { status: 404 });
+        }
+        return row;
+      };
+
+      if (req.method === 'POST' && !seg[2]) {
+        if (!can(user, 'payouts', 'create')) return fail(res, 403, 'Немає прав додавати звіти');
+        // Ліміт більший за типові 2 МБ: PDF у base64 важить на третину більше.
+        const body = await readBody(req, 12 * 1024 * 1024);
+        const mine = await payouts.periodRows(user, String(body.period || ''));
+        if (!mine.some((r) => Number(r.user_id) === Number(body.user_id))) {
+          return fail(res, 403, 'Цьому співробітнику ви не можете додати звіт');
+        }
+        const row = await payouts.addReport(user, body);
+        await audit({ user_id: user.id, action: 'payout_report_add', entity: 'payouts', entity_id: row.id,
+          payload: { user_id: row.user_id, period: row.period, file: row.file_name }, ip });
+        return ok(res, { row });
+      }
+
+      const reportId = Number(seg[2]);
+      if (seg[2] && seg[3] === 'file' && req.method === 'GET') {
+        await guard(reportId);
+        const file = await payouts.reportFile(reportId);
+        await audit({ user_id: user.id, action: 'payout_report_download', entity: 'payouts', entity_id: reportId, ip });
+        return send(res, 200, file.buffer, {
+          'content-type': file.mime || 'application/pdf',
+          'content-disposition': `inline; filename="${encodeURIComponent(file.file_name)}"`,
+        });
+      }
+      if (seg[2] && seg[3] === 'analyze' && req.method === 'POST') {
+        if (!can(user, 'payouts', 'update')) return fail(res, 403, 'Немає прав редагувати виплати');
+        await guard(reportId);
+        return ok(res, { row: await payouts.analyzeReport(reportId) });
+      }
+      if (seg[2] && seg[3] === 'apply' && req.method === 'POST') {
+        if (!can(user, 'payouts', 'update')) return fail(res, 403, 'Немає прав редагувати виплати');
+        await guard(reportId);
+        const applied = await payouts.applyReport(reportId, (await readBody(req)).amount);
+        await audit({ user_id: user.id, action: 'payout_report_apply', entity: 'payouts', entity_id: reportId,
+          payload: applied, ip });
+        return ok(res, applied);
+      }
+      if (seg[2] && !seg[3] && req.method === 'DELETE') {
+        if (!can(user, 'payouts', 'delete')) return fail(res, 403, 'Немає прав видаляти звіти');
+        await guard(reportId);
+        await audit({ user_id: user.id, action: 'payout_report_delete', entity: 'payouts', entity_id: reportId, ip });
+        return ok(res, await payouts.deleteReport(reportId));
+      }
+      return fail(res, 405, 'Метод не підтримується');
+    }
+    return fail(res, 405, 'Метод не підтримується');
+  }
+
   if (seg[0] === 'scripts' && seg[1] && (seg[2] === 'full' || seg[2] === 'steps' || seg[2] === 'duplicate')) {
     if (!can(user, 'scripts', 'read')) return fail(res, 403, 'Немає доступу до скриптів');
     const scriptId = Number(seg[1]);
@@ -921,6 +1027,14 @@ export async function handleApi(req, res, url) {
     if (!current || !ownsRow(user, entKey, current)) return fail(res, 404, 'Запис не знайдено');
     if (entKey === 'services' && await get('SELECT id FROM service_package_items WHERE component_service_id=?', id)) {
       return fail(res, 409, 'Послуга входить у пакет — спершу приберіть її звідти');
+    }
+    // Видалення картки шаблонів забрало б із собою всю гілку вкладень —
+    // тому спершу треба розібрати її вручну.
+    if (entKey === 'message_templates') {
+      const kids = await get('SELECT COUNT(*) AS c FROM message_templates WHERE parent_id=?', id);
+      if (Number(kids?.c || 0) > 0) {
+        return fail(res, 409, `Спершу видаліть вкладені картки (${kids.c}) — тоді цю можна буде прибрати`);
+      }
     }
     await remove(ent.table, id);
     await audit({ user_id: user.id, action: 'delete', entity: entKey, entity_id: id, payload: redact(ent, current), ip });
