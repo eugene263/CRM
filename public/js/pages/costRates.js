@@ -34,12 +34,9 @@ export async function renderCostRates() {
     const s = row.service;
     const marginOff = row.margin_percent != null && row.margin_percent < s.target_margin;
 
-    const head = el('div', { class: 'row', style: 'align-items:flex-start;margin-bottom:12px' },
-      el('div', { style: 'flex:1 1 auto' },
-        el('h3', { style: 'margin:0' }, icon('calculator'), s.name),
-        el('div', { class: 'muted', style: 'font-size:12.5px;margin-top:4px' },
-          [s.category, s.unit].filter(Boolean).join(' · ') || '—')),
-      el('div', { class: 'row tight', style: 'gap:18px;align-items:center' },
+    const head = el('div', { class: 'row', style: 'align-items:center;margin-bottom:12px' },
+      el('h3', { style: 'margin:0;flex:1 1 auto' }, icon('calculator'), s.name),
+      el('div', { class: 'row tight', style: 'gap:18px;align-items:center;margin-left:auto;flex:0 0 auto' },
         el('div', {}, el('div', { class: 'label' }, 'Ціна'), el('b', {}, money(row.price))),
         el('div', {}, el('div', { class: 'label' }, 'Собівартість'), el('b', {}, money(row.cost))),
         el('div', {}, el('div', { class: 'label' }, 'Маржа'),
