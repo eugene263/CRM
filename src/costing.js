@@ -49,8 +49,10 @@ const DEFAULT_SERVICES = [
 
 export async function seedCosting() {
   if (await get('SELECT id FROM services LIMIT 1')) return;
+  const groupId = await insert('service_groups', { name: 'Трафік ферма', sort_order: 10 });
   for (const s of DEFAULT_SERVICES) {
     const id = await insert('services', {
+      group_id: groupId,
       name: s.name, category: s.category, unit: s.unit, target_margin: s.target_margin,
       price: s.price, volume_per_month: s.volume_per_month, status: 'active',
     });
@@ -134,6 +136,39 @@ export async function serviceCost(serviceId) {
     volume_per_month: Number(service.volume_per_month || 0),
     profit_per_month: round(profit * Number(service.volume_per_month || 0)),
   };
+}
+
+// ── Послуги (верхній рівень: кнопки над плашками) ─────────────────────────
+export async function listGroups() {
+  return all(`SELECT g.*, (SELECT COUNT(*) FROM services s WHERE s.group_id = g.id) AS packages
+                FROM service_groups g ORDER BY g.sort_order, g.id`);
+}
+
+export async function createGroup(name) {
+  const title = String(name || '').trim();
+  if (!title) throw Object.assign(new Error('Потрібна назва послуги'), { status: 400 });
+  const last = await get('SELECT MAX(sort_order) AS m FROM service_groups');
+  const id = await insert('service_groups', { name: title, sort_order: Number(last?.m || 0) + 10 });
+  return { id, name: title };
+}
+
+export async function renameGroup(groupId, name) {
+  const title = String(name || '').trim();
+  if (!title) throw Object.assign(new Error('Потрібна назва послуги'), { status: 400 });
+  await update('service_groups', groupId, { name: title });
+  return { id: groupId, name: title };
+}
+
+// Видаляти лише порожню: інакше один випадковий клік зніс би всі пакети
+// послуги разом з їхніми витратами.
+export async function deleteGroup(groupId) {
+  const used = await get('SELECT COUNT(*) AS c FROM services WHERE group_id=?', groupId);
+  if (Number(used?.c || 0) > 0) {
+    throw Object.assign(new Error(
+      `Спершу видаліть пакети цієї послуги (${used.c}) — тоді її можна буде прибрати`), { status: 409 });
+  }
+  await run('DELETE FROM service_groups WHERE id=?', groupId);
+  return { ok: true };
 }
 
 export async function listServices({ status = null } = {}) {

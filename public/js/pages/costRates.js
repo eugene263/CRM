@@ -7,26 +7,103 @@ import { el, money, pct, modal, toast, actionButton } from '../ui.js';
 import { icon, withIcon } from '../icons.js';
 import { costLinesBlock } from './costLines.js';
 
+const PICKED_KEY = 'crm_cost_group';
+
 export async function renderCostRates() {
   const box = el('div', {});
   const canCreate = !!state.meta.services?.can.create;
   const canEdit = !!state.meta.services?.can.update;
   const canDelete = !!state.meta.services?.can.delete;
+  let picked = Number(localStorage.getItem(PICKED_KEY)) || null;
 
   async function render() {
-    const { rows } = await api.get('/costing/services');
-    box.textContent = '';
+    const [{ rows: groups }, { rows: all }] = await Promise.all([
+      api.get('/costing/groups'),
+      api.get('/costing/services'),
+    ]);
+    if (!groups.some((g) => g.id === picked)) picked = groups[0]?.id ?? null;
+    if (picked) localStorage.setItem(PICKED_KEY, String(picked));
 
+    box.textContent = '';
+    box.append(groupTabs(groups));
+
+    const rows = all.filter((r) => Number(r.service.group_id) === picked);
     for (const row of rows) box.append(await serviceCard(row));
 
-    if (!rows.length) {
+    if (!groups.length) {
       box.append(el('div', { class: 'card muted' },
-        'Послуг ще немає — натисніть «Додати», щоб створити першу плашку.'));
+        'Послуг ще немає — натисніть «Додати послугу», щоб створити першу.'));
+    } else if (!rows.length) {
+      box.append(el('div', { class: 'card muted' },
+        'У цій послузі ще немає пакетів — натисніть «Додати», щоб створити першу плашку.'));
     }
-    if (canCreate) {
+    if (canCreate && picked) {
       box.append(el('div', { style: 'margin-top:14px' },
         el('button', { class: 'btn primary', onclick: () => newServiceForm() }, withIcon('plus', 'Додати'))));
     }
+  }
+
+  // Кнопки-послуги над плашками: активна підсвічена, поруч із нею — кошик
+  // саме для неї, а в кінці ряду «+», що заводить нову послугу.
+  function groupTabs(groups) {
+    const tabs = el('div', { class: 'row tight', style: 'gap:8px;margin-bottom:16px;align-items:center' });
+    for (const g of groups) {
+      const isActive = g.id === picked;
+      tabs.append(el('button', {
+        class: `btn${isActive ? ' primary' : ''}`,
+        onclick: () => { picked = g.id; localStorage.setItem(PICKED_KEY, String(g.id)); render(); },
+      }, g.name));
+      if (isActive && canEdit) {
+        tabs.append(el('button', {
+          class: 'btn small icon-only', title: 'Перейменувати послугу',
+          onclick: () => renameGroupForm(g),
+        }, icon('edit', 14)));
+      }
+      if (isActive && canDelete) {
+        tabs.append(el('button', {
+          class: 'btn small icon-only danger', title: 'Видалити послугу',
+          onclick: async () => {
+            if (!confirm(`Видалити послугу «${g.name}»?`)) return;
+            try {
+              await api.del(`/costing/groups/${g.id}`);
+              picked = null;
+              await render();
+            } catch (e) { toast(e.message, true); }
+          },
+        }, icon('trash', 14)));
+      }
+    }
+    if (canCreate) {
+      tabs.append(el('button', { class: 'btn', onclick: () => newGroupForm() }, withIcon('plus', 'Послуга')));
+    }
+    return tabs;
+  }
+
+  function newGroupForm() {
+    const name = el('input', { placeholder: 'Наприклад: Трафік ферма' });
+    const formBox = modal('Нова послуга', el('div', { class: 'field' }, el('label', {}, 'Назва'), name),
+      [actionButton('Створити', async () => {
+        if (!name.value.trim()) return toast('Потрібна назва', true);
+        try {
+          const res = await api.post('/costing/groups', { name: name.value.trim() });
+          formBox.remove();
+          picked = res.id;
+          await render();
+        } catch (e) { toast(e.message, true); }
+      })]);
+  }
+
+  function renameGroupForm(g) {
+    const name = el('input', { value: g.name });
+    const formBox = modal('Назва послуги', el('div', { class: 'field' }, el('label', {}, 'Назва'), name),
+      [actionButton('Зберегти', async () => {
+        if (!name.value.trim()) return toast('Потрібна назва', true);
+        try {
+          await api.put(`/costing/groups/${g.id}`, { name: name.value.trim() });
+          formBox.remove();
+          await render();
+        } catch (e) { toast(e.message, true); }
+      })]);
   }
 
   // Одна плашка: шапка з назвою й цифрами послуги + її власні ставки.
@@ -43,13 +120,13 @@ export async function renderCostRates() {
           el('b', { style: marginOff ? 'color:var(--danger)' : undefined },
             row.margin_percent == null ? '—' : pct(row.margin_percent))),
         canEdit ? el('button', {
-          class: 'btn small icon-only', title: 'Назва, ціна, маржа послуги',
+          class: 'btn small icon-only', title: 'Назва, ціна, маржа пакета',
           onclick: () => serviceFieldsForm(s),
         }, icon('edit', 15)) : null,
         canDelete ? el('button', {
-          class: 'btn small icon-only danger', title: 'Видалити послугу',
+          class: 'btn small icon-only danger', title: 'Видалити пакет',
           onclick: async () => {
-            if (!confirm(`Видалити послугу «${s.name}» разом із її ставками?`)) return;
+            if (!confirm(`Видалити пакет «${s.name}» разом із його витратами?`)) return;
             try {
               await api.del(`/services/${s.id}`);
               await render();
@@ -69,7 +146,7 @@ export async function renderCostRates() {
     const margin = el('input', { type: 'number', step: '1', value: 50 });
     const volume = el('input', { type: 'number', step: '1', value: 0 });
     const form = el('div', {},
-      el('div', { class: 'field' }, el('label', {}, 'Назва послуги'), name),
+      el('div', { class: 'field' }, el('label', {}, 'Назва пакета'), name),
       el('div', { class: 'row' },
         el('div', {}, el('label', {}, 'Одиниця'), unit),
         el('div', {}, el('label', {}, 'Цільова маржа, %'), margin)),
@@ -77,12 +154,13 @@ export async function renderCostRates() {
         el('div', {}, el('label', {}, 'Ціна, $'), price),
         el('div', {}, el('label', {}, 'Обсяг/міс'), volume)));
 
-    const formBox = modal('Нова послуга', form, [actionButton('Створити', async () => {
-      if (!name.value.trim()) return toast('Потрібна назва послуги', true);
+    const formBox = modal('Новий пакет', form, [actionButton('Створити', async () => {
+      if (!name.value.trim()) return toast('Потрібна назва пакета', true);
       try {
         await api.post('/services', {
-          name: name.value.trim(), unit: unit.value.trim() || 'шт', price: price.value || 0,
-          target_margin: margin.value || 0, volume_per_month: volume.value || 0, status: 'active',
+          group_id: picked, name: name.value.trim(), unit: unit.value.trim() || 'шт',
+          price: price.value || 0, target_margin: margin.value || 0,
+          volume_per_month: volume.value || 0, status: 'active',
         });
         formBox.remove();
         toast('Плашку створено — тепер додайте в неї ставки');
@@ -99,7 +177,7 @@ export async function renderCostRates() {
     const margin = el('input', { type: 'number', step: '1', value: s.target_margin });
     const volume = el('input', { type: 'number', step: '1', value: s.volume_per_month });
     const form = el('div', {},
-      el('div', { class: 'field' }, el('label', {}, 'Назва послуги'), name),
+      el('div', { class: 'field' }, el('label', {}, 'Назва пакета'), name),
       el('div', { class: 'row' },
         el('div', {}, el('label', {}, 'Категорія'), category),
         el('div', {}, el('label', {}, 'Одиниця'), unit)),
@@ -110,7 +188,7 @@ export async function renderCostRates() {
         el('div', {}, el('label', {}, 'Цільова маржа, %'), margin)),
       el('div', { class: 'field' }, el('label', {}, 'Обсяг/міс'), volume));
 
-    const formBox = modal(`Послуга · ${s.name}`, form, [actionButton('Зберегти', async () => {
+    const formBox = modal(`Пакет · ${s.name}`, form, [actionButton('Зберегти', async () => {
       try {
         const body = {
           name: name.value, category: category.value, unit: unit.value,

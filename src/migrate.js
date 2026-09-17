@@ -66,7 +66,7 @@ const migrations = [
       }
 
       // Глобальні накладні були відсотком від прямих витрат — тепер це
-      // звичайний рядок типу overhead усередині кожної послуги, де є з чого
+      // звичайний рядок типу overhead усередині кожного пакета, де є з чого
       // їх рахувати.
       const overhead = byCode.overhead;
       if (overhead && Number(overhead.amount) > 0) {
@@ -81,6 +81,21 @@ const migrations = [
              VALUES (?, 'overhead', ?, 'overhead', '%', 1, ?, 900)`,
             s.id, overhead.name || 'Накладні витрати', Number(overhead.amount));
         }
+      }
+    },
+  },
+  {
+    // Над пакетами зʼявився рівень «послуга» (кнопки над плашками). Наявні
+    // пакети складаються в одну першу послугу, щоб нічого не зникло з очей.
+    id: '2026-09-21-service-groups',
+    async up() {
+      const cols = await columnsOf('services');
+      if (!cols.has('group_id')) await run('ALTER TABLE services ADD COLUMN group_id INTEGER');
+      if (!(await all('SELECT id FROM services WHERE group_id IS NOT NULL LIMIT 1')).length
+        && (await all('SELECT id FROM services LIMIT 1')).length) {
+        await run(`INSERT INTO service_groups (name, sort_order) VALUES ('Трафік ферма', 10)`);
+        const group = (await all(`SELECT id FROM service_groups ORDER BY id LIMIT 1`))[0];
+        await run('UPDATE services SET group_id=? WHERE group_id IS NULL', group.id);
       }
     },
   },

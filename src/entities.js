@@ -631,6 +631,8 @@ export const entities = {
     label: 'Послуги та ціни', group: 'Фінанси', icon: 'calculator', title: 'name',
     fields: [
       { name: 'name', label: 'Пакети', type: 'text', required: true, list: true },
+      // До якої послуги (кнопки на екрані «Ставки собівартості») належить пакет.
+      { name: 'group_id', label: 'Послуга', type: 'number' },
       { name: 'is_package', label: 'Тип', type: 'select', list: true, readOnly: true, options: S(
         ['0', 'Послуги'], ['1', 'Пакети']) },
       { name: 'category', label: 'Категорія', type: 'text', list: true },

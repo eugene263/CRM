@@ -507,6 +507,15 @@ export async function handleApi(req, res, url) {
     const canEdit = can(user, 'services', 'update');
 
     if (seg[1] === 'services' && !seg[2]) return ok(res, await costing.listServices(query));
+
+    // Послуги верхнього рівня — кнопки над плашками пакетів.
+    if (seg[1] === 'groups') {
+      if (req.method === 'GET' && !seg[2]) return ok(res, { rows: await costing.listGroups() });
+      if (!canEdit) return fail(res, 403, 'Немає прав редагувати собівартість');
+      if (req.method === 'POST' && !seg[2]) return ok(res, await costing.createGroup((await readBody(req)).name));
+      if (req.method === 'PUT' && seg[2]) return ok(res, await costing.renameGroup(Number(seg[2]), (await readBody(req)).name));
+      if (req.method === 'DELETE' && seg[2]) return ok(res, await costing.deleteGroup(Number(seg[2])));
+    }
     if (seg[1] === 'suggest') {
       return ok(res, { rates: await costing.suggestedRates(), fixed: await costing.fixedMonthlyCosts() });
     }

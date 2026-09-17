@@ -831,6 +831,35 @@ test('ставка живе у своїй послузі: зміна не чіп
   await call(`/api/costing/services/${mine.service.id}/items`, { method: 'POST', body: line });
 });
 
+test('послуги-групи: пакети належать послузі, порожню можна видалити, непорожню — ні', async () => {
+  const groups = await call('/api/costing/groups');
+  assert.equal(groups.status, 200);
+  const first = groups.data.rows[0];
+  assert.ok(first, 'демо-послуга на місці');
+  assert.ok(Number(first.packages) >= 3, 'демо-пакети складені в цю послугу');
+
+  // Непорожню не віддаємо — інакше один клік зніс би всі пакети з витратами.
+  const busy = await call(`/api/costing/groups/${first.id}`, { method: 'DELETE' });
+  assert.equal(busy.status, 409);
+  assert.match(busy.data.error, /Спершу видаліть пакети/);
+
+  // Порожню — можна.
+  const made = await call('/api/costing/groups', { method: 'POST', body: { name: 'Порожня послуга' } });
+  assert.equal(made.status, 200);
+  assert.equal((await call(`/api/costing/groups/${made.data.id}`, { method: 'DELETE' })).status, 200);
+  assert.ok(!(await call('/api/costing/groups')).data.rows.some((g) => g.id === made.data.id));
+
+  // Новий пакет лягає саме в ту послугу, яку передали.
+  const group2 = await call('/api/costing/groups', { method: 'POST', body: { name: 'Друга послуга' } });
+  const pkg = await call('/api/services', {
+    method: 'POST', body: { name: 'Пакет другої послуги', group_id: group2.data.id, unit: 'шт' },
+  });
+  assert.equal(pkg.status, 200);
+  const rows = (await call('/api/costing/services')).data.rows;
+  const mine = rows.find((r) => r.service.id === pkg.data.id);
+  assert.equal(Number(mine.service.group_id), group2.data.id, 'пакет прив’язаний до своєї послуги');
+});
+
 test('неактивний рядок не йде в собівартість, накладні — відсоток від решти', async () => {
   const { rows } = (await call('/api/costing/services')).data;
   const row = rows.find((r) => r.lines.some((l) => l.kind === 'overhead'));

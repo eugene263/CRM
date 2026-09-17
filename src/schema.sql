@@ -814,8 +814,21 @@ CREATE TABLE IF NOT EXISTS cost_rates (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Верхній рівень: в інтерфейсі це «послуги» — кнопки над плашками
+-- («Трафік ферма» тощо). Кожна послуга має свій набір пакетів (services),
+-- а в кожному пакеті — свої витрати (service_cost_items).
+CREATE TABLE IF NOT EXISTS service_groups (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- services — те, що в інтерфейсі називається «пакет»: біла плашка зі
+-- своїми витратами. group_id — до якої послуги (кнопки) вона належить.
 CREATE TABLE IF NOT EXISTS services (
   id INTEGER PRIMARY KEY,
+  group_id INTEGER REFERENCES service_groups(id),
   name TEXT NOT NULL,
   category TEXT,
   unit TEXT NOT NULL DEFAULT 'шт',         -- ролик|пакет|місяць|шт
