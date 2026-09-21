@@ -554,7 +554,8 @@ CREATE TABLE IF NOT EXISTS leads (
   note TEXT,
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT
+  updated_at TEXT,
+  board_order REAL NOT NULL DEFAULT 0      -- ручна позиція картки в колонці канбану
 );
 CREATE INDEX IF NOT EXISTS idx_leads_list ON leads(list_id, status_code);
 CREATE INDEX IF NOT EXISTS idx_leads_queue ON leads(owner_user_id, next_contact_at);

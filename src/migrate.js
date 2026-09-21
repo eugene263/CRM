@@ -135,6 +135,27 @@ const migrations = [
       if (!payoutCols.has('hours')) await run('ALTER TABLE payouts ADD COLUMN hours REAL NOT NULL DEFAULT 0');
     },
   },
+  {
+    // Канбан лідів тепер памʼятає ручну позицію картки в колонці, а не
+    // лише сортує за часом оновлення. Наявні картки отримують order у
+    // ТОМУ самому порядку, в якому вони й так показувались (updated_at
+    // DESC, created_at DESC) — щоб міграція нічого візуально не зрушила.
+    id: '2026-09-25-leads-board-order',
+    async up() {
+      const cols = await columnsOf('leads');
+      if (!cols.has('board_order')) await run('ALTER TABLE leads ADD COLUMN board_order REAL NOT NULL DEFAULT 0');
+
+      const rows = await all(
+        `SELECT id, status_code FROM leads ORDER BY status_code, updated_at DESC, created_at DESC`);
+      let prevStatus = null;
+      let order = 0;
+      for (const row of rows) {
+        if (row.status_code !== prevStatus) { prevStatus = row.status_code; order = 0; }
+        await run('UPDATE leads SET board_order=? WHERE id=?', order, row.id);
+        order += 1000;
+      }
+    },
+  },
 ];
 
 export async function migrate() {

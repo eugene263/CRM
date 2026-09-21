@@ -124,6 +124,7 @@ export async function createLead(user, payload, { force = false } = {}) {
 
   const id = await insert('leads', {
     list_id: lead.list_id ?? null,
+    board_order: await topOfColumn(lead.status_code || 'new'),
     company_name: lead.company_name,
     website: lead.website ?? null,
     geo_country: lead.geo_country ?? null,
@@ -171,6 +172,13 @@ export async function createLead(user, payload, { force = false } = {}) {
 }
 
 // ── Статуси ───────────────────────────────────────────────────────────────
+// Позиція нової картки вгорі колонки — так само, як раніше картка
+// спливала нагору сама через сортування за updated_at.
+async function topOfColumn(statusCode) {
+  const top = await get('SELECT MIN(board_order) AS v FROM leads WHERE status_code=?', statusCode);
+  return top?.v == null ? 0 : Number(top.v) - 1000;
+}
+
 export async function setStatus(user, leadId, statusCode, extra = {}) {
   const lead = await get('SELECT * FROM leads WHERE id=?', leadId);
   if (!lead) throw Object.assign(new Error('Лід не знайдено'), { status: 404 });
@@ -184,6 +192,19 @@ export async function setStatus(user, leadId, statusCode, extra = {}) {
   }
 
   const patch = { status_code: statusCode, updated_at: now() };
+  // Канбан передає точну позицію (перетягнули між конкретні картки чи в
+  // порожнє місце в кінці/на початку колонки) — довіряємо їй, це лише
+  // порядок показу, а не дані, від яких щось залежить. Якщо позицію не
+  // передали (звичайна зміна статусу без drag&drop), картка стає першою
+  // в новій колонці — так само, як і раніше, коли зверху спливало
+  // щойно оновлене.
+  if (extra.board_order !== undefined && extra.board_order !== null && extra.board_order !== '') {
+    const order = Number(extra.board_order);
+    if (!Number.isFinite(order)) throw Object.assign(new Error('Некоректна позиція картки'), { status: 400 });
+    patch.board_order = order;
+  } else if (statusCode !== lead.status_code) {
+    patch.board_order = await topOfColumn(statusCode);
+  }
   if (extra.disqualify_reason) patch.disqualify_reason = extra.disqualify_reason;
   if (extra.lost_reason) patch.lost_reason = extra.lost_reason;
   if (statusCode === 'qualified' && !lead.qualified_at) patch.qualified_at = now();
@@ -381,11 +402,14 @@ const round2 = (v) => Math.round(Number(v || 0) * 100) / 100;
 // генерик-список), сума очікуваних сум і кількість.
 export async function kanban(scopeSql, scopeParams) {
   const statuses = await all('SELECT * FROM lead_statuses WHERE is_active=1 ORDER BY sort_order');
+  // board_order — ручна позиція картки в колонці (перетягування задає її
+  // явно); id як тайбрейкер, бо однакове значення трапляється в старих
+  // записах, засіяних однією міграцією одним і тим самим кроком.
   const leads = await all(
     `SELECT l.id, l.company_name, l.status_code, l.expected_amount, l.priority, l.owner_user_id,
-            l.geo_city, l.vertical, u.name AS owner_name
+            l.geo_city, l.vertical, l.board_order, u.name AS owner_name
        FROM leads l LEFT JOIN users u ON u.id=l.owner_user_id
-      WHERE ${scopeSql} ORDER BY l.updated_at DESC, l.created_at DESC`, ...scopeParams);
+      WHERE ${scopeSql} ORDER BY l.board_order ASC, l.id ASC`, ...scopeParams);
 
   const byStatus = new Map(statuses.map((s) => [s.code, []]));
   for (const lead of leads) byStatus.get(lead.status_code)?.push(lead);

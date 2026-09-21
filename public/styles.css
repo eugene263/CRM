@@ -155,6 +155,9 @@ label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px
 }
 .kanban-card:hover { border-color: var(--accent); }
 .kanban-card.dragging { opacity: .4; }
+/* Лінія-індикатор: де саме картка ляже, коли її відпустять — між двома
+   конкретними картками, а не просто «десь у колонці». */
+.kanban-drop-indicator { height: 3px; border-radius: 2px; background: var(--accent); }
 .kanban-card-title { font-weight: 500; font-size: 13.5px; }
 
 /* Картки списків пошуку */

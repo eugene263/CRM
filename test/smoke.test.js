@@ -569,6 +569,63 @@ test('канбан використовує той самий ендпоїнт �
   assert.ok(wonCol.leads.some((l) => l.id === lead.data.id));
 });
 
+// ── Ручна позиція карток у канбані (перетягування між конкретні картки) ──
+test('новий лід зʼявляється вгорі своєї колонки', async () => {
+  const first = await createLead({ company_name: 'Порядок А', source: baseSource });
+  const second = await createLead({ company_name: 'Порядок Б', source: baseSource });
+
+  const { columns } = (await call('/api/prospecting/kanban')).data;
+  const col = columns.find((c) => c.code === 'new');
+  const ids = col.leads.map((l) => l.id);
+  assert.ok(ids.indexOf(second.data.id) < ids.indexOf(first.data.id), 'останній створений лід — найвищий у колонці');
+});
+
+test('перетягування задає точну позицію картки — між двома конкретними картками', async () => {
+  const a = await createLead({ company_name: 'Плашка A', source: baseSource });
+  const b = await createLead({ company_name: 'Плашка B', source: baseSource });
+  const c = await createLead({ company_name: 'Плашка C', source: baseSource });
+
+  const before = (await call('/api/prospecting/kanban')).data.columns.find((col) => col.code === 'new');
+  const orderOf = (id) => before.leads.find((l) => l.id === id).board_order;
+  // Кладемо найстаршу картку (A) точно між B і C — так, як це порахував би
+  // фронтенд за сусідніми board_order при drop між ними.
+  const midOrder = (Number(orderOf(b.data.id)) + Number(orderOf(c.data.id))) / 2;
+
+  const moved = await call(`/api/prospecting/leads/${a.data.id}/status`, {
+    method: 'POST', body: { status_code: 'new', board_order: midOrder },
+  });
+  assert.equal(moved.status, 200, JSON.stringify(moved.data));
+
+  const after = (await call('/api/prospecting/kanban')).data.columns.find((col) => col.code === 'new');
+  const ids = after.leads.map((l) => l.id);
+  const bi = ids.indexOf(b.data.id), ai = ids.indexOf(a.data.id), ci = ids.indexOf(c.data.id);
+  // B і C створені пізніше за A, тож обидва спливли вище за неї (нове —
+  // завжди вгорі колонки): видимий порядок був C, B, A. Поклали A рівно
+  // між їхніми board_order — вона й опиняється між ними: C, A, B.
+  assert.ok(ci < ai && ai < bi, `A має опинитись рівно між C і B, отримали порядок: ${JSON.stringify(ids)}`);
+});
+
+test('перехід в іншу колонку без явної позиції стає першим у ній, як і раніше', async () => {
+  const a = await createLead({ company_name: 'Автопозиція A', source: baseSource });
+  await createLead({ company_name: 'Автопозиція B', source: baseSource });
+
+  const moved = await call(`/api/prospecting/leads/${a.data.id}/status`, {
+    method: 'POST', body: { status_code: 'qualified' },
+  });
+  assert.equal(moved.status, 200);
+
+  const col = (await call('/api/prospecting/kanban')).data.columns.find((c) => c.code === 'qualified');
+  assert.equal(col.leads[0]?.id, a.data.id, 'без явної позиції картка лягає першою в новій колонці');
+});
+
+test('некоректна позиція картки відхиляється', async () => {
+  const a = await createLead({ company_name: 'Крива позиція', source: baseSource });
+  const res = await call(`/api/prospecting/leads/${a.data.id}/status`, {
+    method: 'POST', body: { status_code: 'new', board_order: 'не число' },
+  });
+  assert.equal(res.status, 400);
+});
+
 // ── Картки списків пошуку ────────────────────────────────────────────────
 
 test('список пошуку: «Організації» — це його ліди, «Особи» зводить контакти по людині', async () => {
