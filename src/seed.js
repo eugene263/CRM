@@ -106,6 +106,29 @@ async function seedDemo() {
     }));
   }
 
+  // Ферми — блок пристроїв клієнта в конкретному гео. Два клієнти агенції,
+  // по 1-2 ферми на кожного, різні гео — саме так, як описано в задачі:
+  // одна ферма = одне гео, у клієнта може бути кілька ферм і гео.
+  const farmClientA = await insert('clients', {
+    name: 'CryptoWave OÜ', geo_country: 'EE', vertical: 'crypto', owner_user_id: users[7].id,
+  });
+  const farmClientB = await insert('clients', {
+    name: 'BeautyLab GmbH', geo_country: 'DE', vertical: 'beauty', owner_user_id: users[7].id,
+  });
+  const farmSpecs = [
+    { name: 'Ферма UA-1', client_id: farmClientA, geo: 'UA', target_devices: 20 },
+    { name: 'Ферма PL-1', client_id: farmClientA, geo: 'PL', target_devices: 15 },
+    { name: 'Ферма DE-1', client_id: farmClientB, geo: 'DE', target_devices: 10 },
+  ];
+  const farmIds = [];
+  for (const f of farmSpecs) farmIds.push(await insert('farms', { ...f, owner_user_id: users[7].id }));
+  // Половину наявних телефонів розкидаємо по фермах — решта лишається
+  // «вільними» пристроями поза фермовою структурою, щоб було видно різницю.
+  for (const [i, d] of devices.entries()) {
+    if (i % 2 === 0) await run('UPDATE devices SET farm_id=? WHERE id=?', farmIds[i % farmIds.length], d);
+  }
+
+  const NICHES = ['crypto', 'beauty', 'gaming', 'finance tips', 'fitness', 'travel', null];
   const accounts = [];
   for (let i = 0; i < 28; i += 1) {
     const owner = pick(creators);
@@ -114,7 +137,7 @@ async function seedDemo() {
     const id = await insert('accounts', {
       platform: pick(['tiktok', 'tiktok', 'instagram', 'youtube']),
       nickname: `gen_${token(3).toLowerCase()}_${i}`,
-      status, geo: pick(['UA', 'PL', 'DE', 'IT']),
+      status, geo: pick(['UA', 'PL', 'DE', 'IT']), niche: pick(NICHES),
       registered_at: day(created), farm_started_at: day(created), live_started_at: status === 'farm' ? null : day(created - 3),
       banned_at: status === 'ban' ? day(rnd(1, 9)) : null,
       device_id: pick(devices), proxy_id: pick(proxies), sim_id: pick(sims), mail_id: pick(mails),

@@ -12,6 +12,7 @@ import * as aiAssistant from './aiAssistant.js';
 import * as kpi from './kpi.js';
 import * as costing from './costing.js';
 import * as payouts from './payouts.js';
+import * as farms from './farms.js';
 import * as scripts from './scripts.js';
 import * as clients from './clients.js';
 import { encrypt, decrypt, token, hashIp } from './crypto.js';
@@ -312,7 +313,7 @@ async function refOptions(user) {
   const titles = {
     users: 'name', teams: 'name', accounts: 'nickname', devices: 'model', sims: 'number',
     proxies: 'host', mail_accounts: 'login', offers: 'name', partners: 'name', creatives: 'title', posts: 'url',
-    prospect_lists: 'name',
+    prospect_lists: 'name', clients: 'name', farms: 'name',
   };
   for (const [key, col] of Object.entries(titles)) {
     if (!can(user, key, 'read')) continue;
@@ -908,6 +909,23 @@ export async function handleApi(req, res, url) {
     }
   }
 
+  // ── Ферми: агреговані вибірки поверх generic-CRUD /api/farms ──────────
+  // /api/farms і /api/farms/:id (список/створення/редагування самої
+  // ферми) ідуть через генерик-CRUD нижче — тут лише агрегації для
+  // структурованого огляду: плашки ферм, фільтрований список акаунтів,
+  // дерево «ферма → телефон → акаунти» однієї ферми.
+  if (seg[0] === 'farms' && ['overview', 'accounts', 'filters'].includes(seg[1])) {
+    if (!can(user, 'farms', 'read')) return fail(res, 403, 'Немає доступу до ферм');
+    if (seg[1] === 'overview' && req.method === 'GET') return ok(res, { rows: await farms.listFarms(user) });
+    if (seg[1] === 'filters' && req.method === 'GET') return ok(res, await farms.filterOptions(user));
+    if (seg[1] === 'accounts' && req.method === 'GET') return ok(res, { rows: await farms.listFarmAccounts(user, query) });
+    return fail(res, 405, 'Метод не підтримується');
+  }
+  if (seg[0] === 'farms' && seg[1] && !Number.isNaN(Number(seg[1])) && seg[2] === 'detail') {
+    if (!can(user, 'farms', 'read')) return fail(res, 403, 'Немає доступу до ферм');
+    return ok(res, await farms.farmDetail(user, Number(seg[1])));
+  }
+
   // --- клієнти ---
   // Плоскі /api/clients і /api/clients/:id (список/створення/редагування
   // картки) ідуть через генерик-CRUD нижче — тут лише вкладені дії
@@ -1048,6 +1066,9 @@ export async function handleApi(req, res, url) {
         return fail(res, 409, `Спершу видаліть вкладені картки (${kids.c}) — тоді цю можна буде прибрати`);
       }
     }
+    // Ферму можна видалити і непорожньою (пристрої нікуди не діваються) —
+    // просто відв'язуємо їх, інакше farm_id лишився б висіти на неіснуючій фермі.
+    if (entKey === 'farms') await run('UPDATE devices SET farm_id=NULL WHERE farm_id=?', id);
     await remove(ent.table, id);
     await audit({ user_id: user.id, action: 'delete', entity: entKey, entity_id: id, payload: redact(ent, current), ip });
     return ok(res, { ok: true });

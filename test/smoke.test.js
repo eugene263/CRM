@@ -1580,3 +1580,133 @@ test('час і гроші однієї людини рахуються за д�
   const denied = await call(`/api/payouts/range?user_id=${withHours.user_id}&from=${from}&to=${to}`, { as: 'creator' });
   assert.equal(denied.status, 404, 'чужа людина недоступна за скоупом');
 });
+
+// ── Ферми: блок пристроїв клієнта в конкретному гео ───────────────────────
+async function makeFarm(overrides = {}) {
+  const clientRes = await call('/api/clients', { method: 'POST', body: { name: `Клієнт ферми ${Date.now()}` } });
+  assert.equal(clientRes.status, 200, JSON.stringify(clientRes.data));
+  const client = clientRes.data.row;
+  const farm = await call('/api/farms', {
+    method: 'POST',
+    body: { name: `Ферма ${Date.now()}`, client_id: client.id, geo: 'UA', target_devices: 5, ...overrides },
+  });
+  assert.equal(farm.status, 200, JSON.stringify(farm.data));
+  return { client, farm: farm.data.row };
+}
+
+test('ферма створюється з клієнтом і гео, генерик-CRUD віддає її назад', async () => {
+  const { farm, client } = await makeFarm({ name: 'Ферма тест-1' });
+  assert.equal(farm.name, 'Ферма тест-1');
+  assert.equal(Number(farm.client_id), client.id);
+  assert.equal(farm.geo, 'UA');
+  assert.equal(Number(farm.target_devices), 5);
+  assert.equal(farm.status, 'active', 'статус за замовчуванням');
+
+  const fetched = await call(`/api/farms/${farm.id}`);
+  assert.equal(fetched.status, 200);
+  assert.equal(fetched.data.row.name, 'Ферма тест-1');
+});
+
+test('огляд ферм рахує кількість пристроїв і акаунтів на ній', async () => {
+  const { farm } = await makeFarm();
+  const device = await call('/api/devices', { method: 'POST', body: { model: 'Test Phone', farm_id: farm.id } });
+  assert.equal(device.status, 200, JSON.stringify(device.data));
+
+  const account = await call('/api/accounts', {
+    method: 'POST',
+    body: { platform: 'tiktok', nickname: `farmacc_${Date.now()}`, device_id: device.data.id, niche: 'crypto' },
+  });
+  assert.equal(account.status, 200, JSON.stringify(account.data));
+
+  const overview = await call('/api/farms/overview');
+  assert.equal(overview.status, 200);
+  const row = overview.data.rows.find((r) => r.id === farm.id);
+  assert.ok(row, 'нова ферма є в огляді');
+  assert.equal(Number(row.device_count), 1);
+  assert.equal(Number(row.account_count), 1);
+});
+
+test('фільтрований список акаунтів ферм повертає ферму/клієнта/телефон і рахує відео з posts', async () => {
+  const { farm, client } = await makeFarm({ geo: 'PL' });
+  const device = await call('/api/devices', { method: 'POST', body: { model: 'Redmi Farm', farm_id: farm.id } });
+  const account = await call('/api/accounts', {
+    method: 'POST',
+    body: { platform: 'instagram', nickname: `placc_${Date.now()}`, device_id: device.data.id, niche: 'beauty' },
+  });
+
+  const before = await call(`/api/farms/accounts?farm_id=${farm.id}`);
+  assert.equal(before.status, 200);
+  assert.equal(before.data.rows.length, 1);
+  const row = before.data.rows[0];
+  assert.equal(row.farm_name, farm.name);
+  assert.equal(row.client_name, client.name);
+  assert.equal(row.device_model, 'Redmi Farm');
+  assert.equal(row.niche, 'beauty');
+  assert.equal(Number(row.videos_count), 0, 'постів ще немає');
+
+  await call('/api/posts', { method: 'POST', body: { account_id: account.data.id, posted_at: new Date().toISOString() } });
+  await call('/api/posts', { method: 'POST', body: { account_id: account.data.id, posted_at: new Date().toISOString() } });
+  const after = await call(`/api/farms/accounts?farm_id=${farm.id}`);
+  assert.equal(Number(after.data.rows[0].videos_count), 2, 'два запости — два відео в лічильнику');
+
+  // Фільтри звужують вибірку.
+  assert.equal((await call(`/api/farms/accounts?geo=PL`)).data.rows.some((r) => r.id === row.id), true);
+  assert.equal((await call(`/api/farms/accounts?geo=DE`)).data.rows.some((r) => r.id === row.id), false);
+  assert.equal((await call(`/api/farms/accounts?platform=tiktok`)).data.rows.some((r) => r.id === row.id), false);
+  assert.equal((await call(`/api/farms/accounts?niche=beau`)).data.rows.some((r) => r.id === row.id), true, 'niche фільтрує частковим збігом');
+  assert.equal((await call(`/api/farms/accounts?q=${encodeURIComponent('Redmi Farm')}`)).data.rows.some((r) => r.id === row.id), true, 'пошук знаходить за моделлю телефону');
+});
+
+test('картка ферми показує дерево пристрій → акаунти', async () => {
+  const { farm } = await makeFarm();
+  const deviceA = await call('/api/devices', { method: 'POST', body: { model: 'Phone A', farm_id: farm.id } });
+  const deviceB = await call('/api/devices', { method: 'POST', body: { model: 'Phone B', farm_id: farm.id } });
+  await call('/api/accounts', { method: 'POST', body: { platform: 'tiktok', nickname: `a1_${Date.now()}`, device_id: deviceA.data.id } });
+  await call('/api/accounts', { method: 'POST', body: { platform: 'youtube', nickname: `a2_${Date.now()}`, device_id: deviceA.data.id } });
+
+  const detail = await call(`/api/farms/${farm.id}/detail`);
+  assert.equal(detail.status, 200, JSON.stringify(detail.data));
+  assert.equal(detail.data.farm.id, farm.id);
+  assert.equal(detail.data.devices.length, 2);
+  const devA = detail.data.devices.find((d) => d.id === deviceA.data.id);
+  const devB = detail.data.devices.find((d) => d.id === deviceB.data.id);
+  assert.equal(devA.accounts.length, 2);
+  assert.equal(devB.accounts.length, 0);
+});
+
+test('видалення ферми відвʼязує її пристрої, а не лишає їх висіти на неіснуючій фермі', async () => {
+  const { farm } = await makeFarm();
+  const device = await call('/api/devices', { method: 'POST', body: { model: 'Orphan Phone', farm_id: farm.id } });
+
+  assert.equal((await call(`/api/farms/${farm.id}`, { method: 'DELETE' })).status, 200);
+  const after = await call(`/api/devices/${device.data.id}`);
+  assert.equal(after.data.row.farm_id, null, 'farm_id очищено, а не лишився висіти');
+});
+
+test('довідники фільтрів віддають лише те, що реально є в даних', async () => {
+  const { farm } = await makeFarm({ geo: 'IT' });
+  const device = await call('/api/devices', { method: 'POST', body: { model: 'Filter Phone', farm_id: farm.id } });
+  await call('/api/accounts', {
+    method: 'POST', body: { platform: 'youtube', nickname: `filt_${Date.now()}`, device_id: device.data.id, niche: 'travel-unique' },
+  });
+
+  const filters = await call('/api/farms/filters');
+  assert.equal(filters.status, 200);
+  assert.ok(filters.data.geos.includes('IT'));
+  assert.ok(filters.data.platforms.includes('youtube'));
+  assert.ok(filters.data.niches.includes('travel-unique'));
+  assert.ok(filters.data.clients.some((c) => Number(c.id) === Number(farm.client_id)));
+});
+
+test('крієйтор не має доступу до розділу ферм', async () => {
+  assert.equal((await call('/api/farms', { as: 'creator' })).status, 403);
+  assert.equal((await call('/api/farms/overview', { as: 'creator' })).status, 403);
+});
+
+test('фармер бачить і клієнтів (щоб було з чого обрати), і повний доступ до ферм', async () => {
+  if (!jar.farmer) await login('farmer', 'farmer@gennect.local', 'demo1234');
+  const asFarmer = await call('/api/farms', { as: 'farmer' });
+  assert.equal(asFarmer.status, 200);
+  const clientsAsFarmer = await call('/api/clients', { as: 'farmer' });
+  assert.equal(clientsAsFarmer.status, 200, 'без цього форма ферми лишилась би без клієнтів у списку');
+});

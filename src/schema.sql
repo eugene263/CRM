@@ -43,8 +43,17 @@ CREATE TABLE IF NOT EXISTS devices (
   issued_at TEXT,
   cost REAL DEFAULT 0,
   note TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  -- Без inline REFERENCES: farms визначена нижче в цьому файлі (після
+  -- clients, бо farms.client_id посилається на неї) — Postgres виконує
+  -- CREATE TABLE послідовно й не пробачає посилання на ще не створену
+  -- таблицю.
+  farm_id INTEGER
 );
+-- Індекс по farm_id створює міграція, а не цей файл: schema.sql
+-- виконується на кожному старті ще ДО міграцій, і на наявній базі
+-- колонки farm_id у цей момент ще немає — індекс поклав би застосунок.
+
 
 CREATE TABLE IF NOT EXISTS sims (
   id INTEGER PRIMARY KEY,
@@ -103,6 +112,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   cost REAL DEFAULT 0,
   password_enc TEXT,
   note TEXT,
+  niche TEXT,                              -- тематика контенту акаунта (вертикаль ніші)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_accounts_owner ON accounts(owner_user_id);
@@ -942,6 +952,23 @@ CREATE TABLE IF NOT EXISTS clients (
 );
 CREATE INDEX IF NOT EXISTS idx_clients_owner ON clients(owner_user_id, status);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_clients_source_lead ON clients(source_lead_id) WHERE source_lead_id IS NOT NULL;
+
+-- Ферма — блок пристроїв (типово ~20 телефонів) одного клієнта в одному
+-- гео. Одна ферма = одне гео; в клієнта може бути кілька ферм і,
+-- відповідно, кілька гео. Гео тут — просте поле (як і в проксі), без
+-- живої звірки з гео підключених проксі.
+CREATE TABLE IF NOT EXISTS farms (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  geo TEXT,
+  target_devices INTEGER NOT NULL DEFAULT 20,  -- орієнтир, не жорсткий ліміт
+  status TEXT NOT NULL DEFAULT 'active',       -- active|paused|closed
+  owner_user_id INTEGER REFERENCES users(id),
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_farms_client ON farms(client_id);
 
 CREATE TABLE IF NOT EXISTS client_services (
   id INTEGER PRIMARY KEY,

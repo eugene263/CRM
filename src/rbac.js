@@ -12,7 +12,7 @@ export const LEVELS = { none: 0, read: 1, write: 2, full: 3 };
 const R = (level, scope = 'all') => ({ level, scope });
 
 // Базові набори, щоб матриця читалась, а не розповзалась на 200 рядків.
-const RESOURCE = ['accounts', 'devices', 'sims', 'proxies', 'mail_accounts', 'resource_assignments', 'account_events'];
+const RESOURCE = ['accounts', 'devices', 'sims', 'proxies', 'mail_accounts', 'resource_assignments', 'account_events', 'farms'];
 const VAULT_SELF = { credentials: R('read', 'own'), credential_grants: R('read', 'own'), access_requests: R('write', 'own') };
 // Пошук клієнтів: менеджер працює зі своїми лідами, довідники лише читає.
 const PROSPECTING_SELF = {
@@ -114,6 +114,9 @@ export const defaultMatrix = {
     kpi_targets: R('read', 'own'),
     notifications: R('read', 'own'),
     users: R('read', 'all'),
+    // Ферма прив'язана до клієнта — без читання клієнтів нема з чого
+    // вибирати в формі ферми.
+    clients: R('read', 'all'),
   },
 
   finance: {
@@ -127,7 +130,7 @@ export const defaultMatrix = {
     kpi_targets: R('write', 'all'),
     audit_log: R('read', 'all'),
     notifications: R('read', 'all'),
-    devices: R('read', 'all'), sims: R('read', 'all'), proxies: R('read', 'all'), mail_accounts: R('read', 'all'),
+    devices: R('read', 'all'), sims: R('read', 'all'), proxies: R('read', 'all'), mail_accounts: R('read', 'all'), farms: R('read', 'all'),
     clients: R('read', 'all'),
   },
 

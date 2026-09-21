@@ -12,6 +12,7 @@ import { renderProspectListsCards } from './prospectLists.js';
 import { renderCostRates } from './costRates.js';
 import { renderMessageTemplates } from './messageTemplates.js';
 import { renderPayouts } from './payouts.js';
+import { renderFarms } from './farms.js';
 import { icon, withIcon } from '../icons.js';
 
 const PAGE = 50;
@@ -121,6 +122,9 @@ export async function renderEntity(entKey) {
   if (entKey === 'message_templates') return renderMessageTemplates();
   // Виплати — рік → місяць → людина з PDF-звітами і міні-дашбордом.
   if (entKey === 'payouts') return renderPayouts();
+  // Ферми — плашки ферм + фільтрований список акаунтів, а не плоска
+  // таблиця самих ферм.
+  if (entKey === 'farms') return renderFarms();
   return renderEntityTable(entKey);
 }
 

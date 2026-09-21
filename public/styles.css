@@ -176,6 +176,8 @@ label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px
   padding: 14px 16px; box-shadow: var(--shadow); cursor: pointer; display: flex; flex-direction: column; gap: 6px;
 }
 .list-card:hover { border-color: var(--accent); }
+/* Обрана плашка ферми — фільтр таблиці зараз стоїть саме на ній. */
+.list-card.picked { border-color: var(--accent); background: var(--accent-soft); }
 .list-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .list-card-head b { font-size: 14.5px; }
 .list-card-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }

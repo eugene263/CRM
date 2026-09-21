@@ -156,6 +156,21 @@ const migrations = [
       }
     },
   },
+  {
+    // Ферми — новий розділ: блок пристроїв (девайси) одного клієнта в
+    // одному гео, з акаунтами на кожному пристрої. Сама таблиця farms
+    // створюється schema.sql (CREATE TABLE IF NOT EXISTS) на кожному
+    // старті — тут лише ALTER наявних devices/accounts, яких schema.sql
+    // заднім числом не чіпає.
+    id: '2026-09-26-farms',
+    async up() {
+      const deviceCols = await columnsOf('devices');
+      if (!deviceCols.has('farm_id')) await run('ALTER TABLE devices ADD COLUMN farm_id INTEGER');
+      await run('CREATE INDEX IF NOT EXISTS idx_devices_farm ON devices(farm_id)');
+      const accountCols = await columnsOf('accounts');
+      if (!accountCols.has('niche')) await run('ALTER TABLE accounts ADD COLUMN niche TEXT');
+    },
+  },
 ];
 
 export async function migrate() {

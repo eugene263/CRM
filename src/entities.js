@@ -30,6 +30,23 @@ export const entities = {
   },
 
   // ── Ресурси ────────────────────────────────────────────────────────────
+  // Ферма — блок пристроїв (типово ~20 телефонів) одного клієнта в одному
+  // гео. Сама вкладеність (ферма → девайс → акаунти на ньому) не поле цієї
+  // сутності — вона видно через devices.farm_id і accounts.device_id, а
+  // структурований огляд з фільтрами живе на окремій сторінці (farms.js).
+  farms: {
+    label: 'Ферми', group: 'Ресурси', icon: 'grid', title: 'name',
+    fields: [
+      { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
+      { name: 'client_id', label: 'Клієнт', type: 'ref', ref: 'clients', required: true, list: true },
+      { name: 'geo', label: 'Гео', type: 'text', list: true },
+      { name: 'target_devices', label: 'Ціль: телефонів', type: 'number', list: true },
+      { name: 'status', label: 'Статус', type: 'select', list: true, options: S(
+        ['active', 'Активна'], ['paused', 'Пауза'], ['closed', 'Закрита']) },
+      { name: 'owner_user_id', label: 'Відповідальний', type: 'ref', ref: 'users', list: true },
+      { name: 'note', label: 'Нотатка', type: 'textarea' },
+    ],
+  },
   accounts: {
     label: 'Акаунти', group: 'Ресурси', icon: 'phone', ownField: 'owner_user_id', teamField: 'team_id',
     title: 'nickname',
@@ -42,6 +59,7 @@ export const entities = {
       { name: 'status', label: 'Статус', type: 'select', list: true, options: S(
         ['farm', 'Фарм'], ['active', 'Актив'], ['shadowban', 'Шедоубан'], ['ban', 'Бан'], ['sold', 'Проданий']) },
       { name: 'geo', label: 'Гео', type: 'text', list: true },
+      { name: 'niche', label: 'Тематика', type: 'text', list: true, hint: 'ніша контенту, який публікує акаунт' },
       { name: 'registered_at', label: 'Реєстрація', type: 'date' },
       { name: 'farm_started_at', label: 'Старт фарму', type: 'date' },
       { name: 'live_started_at', label: 'Старт заливу', type: 'date' },
@@ -63,6 +81,7 @@ export const entities = {
     fields: [
       { name: 'model', label: 'Модель', type: 'text', required: true, list: true },
       { name: 'imei', label: 'IMEI', type: 'text', list: true },
+      { name: 'farm_id', label: 'Ферма', type: 'ref', ref: 'farms', list: true },
       { name: 'status', label: 'Статус', type: 'select', list: true, options: S(
         ['free', 'Вільний'], ['in_use', 'У роботі'], ['repair', 'Ремонт'], ['dead', 'Списаний']) },
       { name: 'holder_user_id', label: 'Кому видано', type: 'ref', ref: 'users', list: true },
