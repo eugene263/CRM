@@ -114,6 +114,18 @@ function setGroupCollapsed(group, collapsed) {
   try { localStorage.setItem('crm_nav_collapsed', JSON.stringify([...set])); } catch {}
 }
 
+// Ці розділи прибрані з активного меню на прохання власника — залишаються
+// на місці підписом, щоб не губився контекст «розділ існує», але не
+// відкриваються (напівпрозорі, не клікабельні). Це суто вигляд навігації:
+// самі сторінки й API нікуди не зникли, RBAC тут ні до чого.
+const DISABLED_NAV_KEYS = new Set([
+  'resource_assignments', 'creatives', 'creative_versions', 'tasks', 'posts',
+  'offers', 'offer_rates_history', 'tracking_links', 'conversions',
+  'salary_rules', 'kpi_targets', 'touches', 'dictionaries', 'suppression_list',
+  'channel_limits', 'work_calendar', 'ramp_up_plans', 'bonus_rules', 'quality_flags',
+  'credentials', 'credential_grants', 'clicks', 'account_events', 'audit_log',
+]);
+
 function buildNav() {
   const nav = $('#nav');
   nav.textContent = '';
@@ -126,7 +138,10 @@ function buildNav() {
     ...(state.meta.users ? [{ href: '#/roles', icon: 'shield', label: 'Ролі та права', group: 'Огляд' }] : []),
   ];
   for (const ent of Object.values(state.meta)) {
-    links.push({ href: `#/e/${ent.key}`, icon: ent.icon || ent.key, label: ent.label, group: ent.group });
+    links.push({
+      href: `#/e/${ent.key}`, icon: ent.icon || ent.key, label: ent.label, group: ent.group,
+      disabled: DISABLED_NAV_KEYS.has(ent.key),
+    });
   }
   // Розділи без доступу лишаються в меню замочком, а не зникають —
   // людина бачить, що розділ існує, і знає, що саме просити в адміна.
@@ -143,7 +158,9 @@ function buildNav() {
       items.append(l.locked
         ? el('span', { class: 'nav-locked', title: 'Немає доступу — зверніться до адміністратора' },
           icon(l.icon, 16), l.label, icon('lock', 13))
-        : el('a', { href: l.href, 'data-href': l.href }, icon(l.icon, 16), l.label));
+        : l.disabled
+          ? el('span', { class: 'nav-disabled' }, icon(l.icon, 16), l.label)
+          : el('a', { href: l.href, 'data-href': l.href }, icon(l.icon, 16), l.label));
     }
     const box = el('div', { class: `nav-group${collapsed.has(g) ? ' collapsed' : ''}` });
     box.append(
