@@ -16,11 +16,22 @@ export const fail = (res, status, message, extra = {}) => send(res, status, { er
 export async function readBody(req, limit = 2 * 1024 * 1024) {
   const chunks = [];
   let size = 0;
+  let oversized = false;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > limit) throw Object.assign(new Error('payload too large'), { status: 413 });
+    if (size > limit) {
+      // Не рвемо зʼєднання одразу: клієнт ще пише тіло запиту, і різкий
+      // req.destroy() тут валить його fetch помилкою зʼєднання замість
+      // чистої 413-відповіді. Замість буферизації — тихо досушуємо потік
+      // до кінця (без зайвої памʼяті), а throw кидаємо вже після цього:
+      // так і клієнт отримує охайну відповідь, і наступний запит на тому
+      // самому keep-alive зʼєднанні не встряє в недочитаний хвіст цього.
+      oversized = true;
+      continue;
+    }
     chunks.push(chunk);
   }
+  if (oversized) throw Object.assign(new Error('payload too large'), { status: 413 });
   if (!chunks.length) return {};
   const raw = Buffer.concat(chunks).toString('utf8');
   const type = req.headers['content-type'] || '';

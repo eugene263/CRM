@@ -48,7 +48,15 @@ function serveStatic(req, res, url) {
   send(res, 200, body, {
     'content-type': MIME[path.extname(file)] || 'application/octet-stream',
     'cache-control': 'no-cache',
-    'content-security-policy': "default-src 'self'; img-src 'self' data: https:; media-src 'self' https:; style-src 'self' 'unsafe-inline'",
+    // Мапи «Підключення клієнта» (Excalidraw) тягнуть React/бібліотеку з
+    // esm.sh без збірника — CSP дозволяє скрипти й шрифти саме з цього
+    // походження, плюс один конкретний inline importmap у index.html за
+    // його точним хешем (обчислено з поточного вмісту тегу — якщо колись
+    // зміните імпорти в index.html, хеш треба перерахувати заново).
+    'content-security-policy': "default-src 'self'; img-src 'self' data: https:; media-src 'self' https:; "
+      + "style-src 'self' 'unsafe-inline' https://esm.sh; font-src 'self' https://esm.sh data:; "
+      + "connect-src 'self' https://esm.sh; "
+      + "script-src 'self' https://esm.sh 'sha256-ck4x6wWgzukJxvfu8JUzdcqb+y3o4LH2qw7UfRkSKQU='",
   });
 }
 

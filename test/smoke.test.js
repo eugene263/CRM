@@ -1710,3 +1710,114 @@ test('фармер бачить і клієнтів (щоб було з чого
   const clientsAsFarmer = await call('/api/clients', { as: 'farmer' });
   assert.equal(clientsAsFarmer.status, 200, 'без цього форма ферми лишилась би без клієнтів у списку');
 });
+
+// ── «Підключення клієнта»: дерево канв (папка в папці) ────────────────────
+async function makeClientForMaps() {
+  const res = await call('/api/clients', { method: 'POST', body: { name: `Клієнт для мап ${Date.now()}` } });
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  return res.data.row;
+}
+
+test('корінь дерева створюється сам при першому відкритті клієнта', async () => {
+  const client = await makeClientForMaps();
+  const first = await call(`/api/client_maps/root?client_id=${client.id}`);
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  assert.ok(first.data.id);
+
+  // Повторний виклик не плодить другий корінь.
+  const second = await call(`/api/client_maps/root?client_id=${client.id}`);
+  assert.equal(second.data.id, first.data.id);
+
+  const scene = await call(`/api/client_maps/${first.data.id}/scene`);
+  assert.equal(scene.status, 200);
+  assert.equal(Number(scene.data.node.client_id), client.id);
+  assert.equal(scene.data.node.parent_id, null);
+  assert.deepEqual(scene.data.scene, { elements: [], appState: {} }, 'нова мапа стартує порожньою канвою');
+});
+
+test('сцена зберігається і читається назад такою, якою її прислали', async () => {
+  const client = await makeClientForMaps();
+  const { id } = (await call(`/api/client_maps/root?client_id=${client.id}`)).data;
+
+  const myScene = { elements: [{ id: 'a1', type: 'rectangle', x: 10, y: 20 }], appState: { viewBackgroundColor: '#fff' } };
+  const saved = await call(`/api/client_maps/${id}/scene`, { method: 'PUT', body: { scene: myScene } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.data));
+
+  const back = await call(`/api/client_maps/${id}/scene`);
+  assert.deepEqual(back.data.scene, myScene);
+});
+
+test('дочірня мапа отримує клієнта від батька і порядковий індекс серед сиблінгів', async () => {
+  const client = await makeClientForMaps();
+  const { id: rootId } = (await call(`/api/client_maps/root?client_id=${client.id}`)).data;
+
+  const childA = await call(`/api/client_maps/${rootId}/children`, { method: 'POST', body: { name: 'Ферма UA-1' } });
+  assert.equal(childA.status, 200, JSON.stringify(childA.data));
+  assert.equal(childA.data.index, 0);
+  const childB = await call(`/api/client_maps/${rootId}/children`, { method: 'POST', body: { name: 'Ферма PL-1' } });
+  assert.equal(childB.data.index, 1, 'другий сиблінг отримує наступний індекс');
+
+  const tree = await call(`/api/client_maps/tree?client_id=${client.id}`);
+  assert.equal(tree.status, 200);
+  const names = tree.data.rows.map((r) => r.name).sort();
+  assert.deepEqual(names, ['Ферма PL-1', 'Ферма UA-1', `Підключення: ${client.name}`].sort());
+  assert.equal(Number(tree.data.rows.find((r) => r.id === childA.data.id).client_id ?? client.id), client.id);
+
+  // Онук — третій рівень вкладеності.
+  const grandchild = await call(`/api/client_maps/${childA.data.id}/children`, { method: 'POST', body: { name: 'Телефон #3' } });
+  assert.equal(grandchild.status, 200);
+  const treeAfter = await call(`/api/client_maps/tree?client_id=${client.id}`);
+  assert.equal(treeAfter.data.rows.length, 4, 'корінь + 2 ферми + онук');
+});
+
+test('без назви дочірню мапу не створити', async () => {
+  const client = await makeClientForMaps();
+  const { id: rootId } = (await call(`/api/client_maps/root?client_id=${client.id}`)).data;
+  const res = await call(`/api/client_maps/${rootId}/children`, { method: 'POST', body: { name: '  ' } });
+  assert.equal(res.status, 400);
+});
+
+test('мапу з вкладеннями не видалити, порожню — можна', async () => {
+  const client = await makeClientForMaps();
+  const { id: rootId } = (await call(`/api/client_maps/root?client_id=${client.id}`)).data;
+  const child = await call(`/api/client_maps/${rootId}/children`, { method: 'POST', body: { name: 'Дитина' } });
+
+  const busy = await call(`/api/client_maps/${rootId}`, { method: 'DELETE' });
+  assert.equal(busy.status, 409);
+  assert.match(busy.data.error, /вкладені мапи \(1\)/);
+
+  assert.equal((await call(`/api/client_maps/${child.data.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await call(`/api/client_maps/${rootId}`, { method: 'DELETE' })).status, 200);
+});
+
+test('перейменування йде через звичайний generic-PUT', async () => {
+  const client = await makeClientForMaps();
+  const { id: rootId } = (await call(`/api/client_maps/root?client_id=${client.id}`)).data;
+  const renamed = await call(`/api/client_maps/${rootId}`, { method: 'PUT', body: { name: 'Нова назва' } });
+  assert.equal(renamed.status, 200, JSON.stringify(renamed.data));
+  assert.equal(renamed.data.row.name, 'Нова назва');
+});
+
+test('завелика сцена відхиляється', async () => {
+  const client = await makeClientForMaps();
+  const { id: rootId } = (await call(`/api/client_maps/root?client_id=${client.id}`)).data;
+  const huge = { elements: [{ id: 'x', text: 'A'.repeat(7 * 1024 * 1024) }], appState: {} };
+  const res = await call(`/api/client_maps/${rootId}/scene`, { method: 'PUT', body: { scene: huge } });
+  assert.equal(res.status, 413);
+});
+
+test('крієйтор не бачить «Підключення клієнта», фінансист лише читає', async () => {
+  const client = await makeClientForMaps();
+  const { id: rootId } = (await call(`/api/client_maps/root?client_id=${client.id}`)).data;
+
+  assert.equal((await call(`/api/client_maps/tree?client_id=${client.id}`, { as: 'creator' })).status, 403);
+
+  const finRead = await call(`/api/client_maps/${rootId}/scene`, { as: 'finance' });
+  assert.equal(finRead.status, 200, 'фінансист читає');
+  const finWrite = await call(`/api/client_maps/${rootId}/scene`, {
+    method: 'PUT', as: 'finance', body: { scene: { elements: [], appState: {} } },
+  });
+  assert.equal(finWrite.status, 403, 'фінансист не редагує');
+  const finCreate = await call(`/api/client_maps/${rootId}/children`, { method: 'POST', as: 'finance', body: { name: 'x' } });
+  assert.equal(finCreate.status, 403);
+});

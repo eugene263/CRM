@@ -308,3 +308,11 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 .report-chip.ok { border-color: var(--accent-2); }
 .report-chip.warn { border-color: var(--accent); }
 .report-chip.err { border-color: var(--danger); }
+
+/* Канва «Підключення клієнта» (Excalidraw): фіксована висота під видиму
+   область — бібліотека заповнює свій контейнер абсолютно позиційованими
+   шарами й не вміє сама «дорости» під flex:1 1 auto предка. */
+.excalidraw-embed {
+  height: calc(100vh - 190px); min-height: 480px;
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+}

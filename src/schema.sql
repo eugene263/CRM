@@ -970,6 +970,25 @@ CREATE TABLE IF NOT EXISTS farms (
 );
 CREATE INDEX IF NOT EXISTS idx_farms_client ON farms(client_id);
 
+-- Мапи «Підключення клієнта»: дерево канв Excalidraw (папка в папці), як
+-- у Notion, тільки замість тексту — повноцінна дошка з картками й
+-- стрілочками. Одна мапа = один вузол дерева; корінь дерева — вузол з
+-- parent_id IS NULL, він створюється сам при першому відкритті клієнта.
+-- Сцена (елементи канви) зберігається як є, JSON-рядком — так само, як
+-- Excalidraw тримає її в себе, без розбору на власні таблиці.
+CREATE TABLE IF NOT EXISTS client_maps (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  parent_id INTEGER REFERENCES client_maps(id),
+  name TEXT NOT NULL,
+  scene TEXT NOT NULL DEFAULT '{"elements":[],"appState":{}}',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_client_maps_client ON client_maps(client_id, parent_id);
+
 CREATE TABLE IF NOT EXISTS client_services (
   id INTEGER PRIMARY KEY,
   client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,

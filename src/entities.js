@@ -374,6 +374,22 @@ export const entities = {
       { name: 'note', label: 'Нотатка', type: 'textarea' },
     ],
   },
+  // Дерево канв Excalidraw під клієнтом — папка в папці, як у Notion, але
+  // замість тексту всередині повноцінна дошка з картками й стрілочками.
+  // scene (сама канва) свідомо не оголошена полем: це великий JSON, який
+  // живе через окремий ендпоїнт (src/clientMaps.js), а не через generic-
+  // форму — інакше кожне редагування мапи ганяло б весь блоб туди-сюди
+  // непотрібними полями формою для «Назва»/«Клієнт».
+  client_maps: {
+    label: 'Підключення клієнта', group: 'Клієнти', icon: 'grid', title: 'name',
+    fields: [
+      { name: 'client_id', label: 'Клієнт', type: 'ref', ref: 'clients', required: true, list: true },
+      { name: 'parent_id', label: 'Батьківська мапа', type: 'number' },
+      { name: 'name', label: 'Назва', type: 'text', required: true, list: true },
+      { name: 'sort_order', label: 'Порядок', type: 'number' },
+      { name: 'created_at', label: 'Створено', type: 'datetime', readOnly: true },
+    ],
+  },
   prospect_lists: {
     label: 'Списки пошуку', group: 'Клієнти', icon: 'layers', ownField: 'owner_user_id', teamField: 'team_id', title: 'name',
     fields: [

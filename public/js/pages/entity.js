@@ -13,6 +13,7 @@ import { renderCostRates } from './costRates.js';
 import { renderMessageTemplates } from './messageTemplates.js';
 import { renderPayouts } from './payouts.js';
 import { renderFarms } from './farms.js';
+import { renderClientMapsPicker } from './clientMaps.js';
 import { icon, withIcon } from '../icons.js';
 
 const PAGE = 50;
@@ -125,6 +126,8 @@ export async function renderEntity(entKey) {
   // Ферми — плашки ферм + фільтрований список акаунтів, а не плоска
   // таблиця самих ферм.
   if (entKey === 'farms') return renderFarms();
+  // Підключення клієнта — пікер клієнтів; сама канва живе на #/map/:id.
+  if (entKey === 'client_maps') return renderClientMapsPicker();
   return renderEntityTable(entKey);
 }
 

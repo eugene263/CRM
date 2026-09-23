@@ -13,6 +13,7 @@ import * as kpi from './kpi.js';
 import * as costing from './costing.js';
 import * as payouts from './payouts.js';
 import * as farms from './farms.js';
+import * as clientMaps from './clientMaps.js';
 import * as scripts from './scripts.js';
 import * as clients from './clients.js';
 import { encrypt, decrypt, token, hashIp } from './crypto.js';
@@ -926,6 +927,36 @@ export async function handleApi(req, res, url) {
     return ok(res, await farms.farmDetail(user, Number(seg[1])));
   }
 
+  // ── Мапи «Підключення клієнта»: дерево канв Excalidraw ─────────────────
+  // /api/client_maps і /api/client_maps/:id (перейменування, sort_order,
+  // видалення) ідуть через генерик-CRUD нижче — тут лише дерево, корінь
+  // клієнта, сцена й додавання дочірньої мапи.
+  if (seg[0] === 'client_maps' && ['tree', 'root'].includes(seg[1])) {
+    if (!can(user, 'client_maps', 'read')) return fail(res, 403, 'Немає доступу до мап клієнта');
+    if (!query.client_id) return fail(res, 400, 'Потрібен client_id');
+    if (seg[1] === 'tree') return ok(res, { rows: await clientMaps.tree(user, query.client_id) });
+    if (seg[1] === 'root') return ok(res, { id: await clientMaps.ensureRoot(user, query.client_id) });
+  }
+  if (seg[0] === 'client_maps' && seg[1] && !Number.isNaN(Number(seg[1])) && seg[2]) {
+    if (!can(user, 'client_maps', 'read')) return fail(res, 403, 'Немає доступу до мап клієнта');
+    const mapId = Number(seg[1]);
+    if (seg[2] === 'scene' && req.method === 'GET') {
+      const { node, scene } = await clientMaps.getScene(user, mapId);
+      return ok(res, { node, scene });
+    }
+    if (seg[2] === 'scene' && req.method === 'PUT') {
+      if (!can(user, 'client_maps', 'update')) return fail(res, 403, 'Немає прав редагувати мапу');
+      const body = await readBody(req, clientMaps.MAX_SCENE_BYTES + 1024);
+      return ok(res, await clientMaps.saveScene(user, mapId, body.scene));
+    }
+    if (seg[2] === 'children' && req.method === 'POST') {
+      if (!can(user, 'client_maps', 'create')) return fail(res, 403, 'Немає прав створювати мапи');
+      const body = await readBody(req);
+      return ok(res, await clientMaps.createChild(user, mapId, body.name));
+    }
+    return fail(res, 405, 'Метод не підтримується');
+  }
+
   // --- клієнти ---
   // Плоскі /api/clients і /api/clients/:id (список/створення/редагування
   // картки) ідуть через генерик-CRUD нижче — тут лише вкладені дії
@@ -1069,6 +1100,14 @@ export async function handleApi(req, res, url) {
     // Ферму можна видалити і непорожньою (пристрої нікуди не діваються) —
     // просто відв'язуємо їх, інакше farm_id лишився б висіти на неіснуючій фермі.
     if (entKey === 'farms') await run('UPDATE devices SET farm_id=NULL WHERE farm_id=?', id);
+    // Видалення мапи забрало б із собою всю вкладену гілку — так само,
+    // як картки шаблонів, спершу розбираємо вручну.
+    if (entKey === 'client_maps') {
+      const kids = await get('SELECT COUNT(*) AS c FROM client_maps WHERE parent_id=?', id);
+      if (Number(kids?.c || 0) > 0) {
+        return fail(res, 409, `Спершу видаліть вкладені мапи (${kids.c}) — тоді цю можна буде прибрати`);
+      }
+    }
     await remove(ent.table, id);
     await audit({ user_id: user.id, action: 'delete', entity: entKey, entity_id: id, payload: redact(ent, current), ip });
     return ok(res, { ok: true });

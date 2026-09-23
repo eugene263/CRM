@@ -44,7 +44,7 @@ export const defaultMatrix = {
   teamlead: {
     ...spread(RESOURCE, R('write', 'team')),
     prospect_lists: R('full', 'team'), leads: R('full', 'team'), touches: R('read', 'team'),
-    clients: R('full', 'team'),
+    clients: R('full', 'team'), client_maps: R('full', 'team'),
     message_templates: R('full', 'all'), scripts: R('full', 'all'), lead_statuses: R('write', 'all'), dictionaries: R('write', 'all'),
     suppression_list: R('full', 'all'),
     kpi_plans: R('full', 'team'), channel_limits: R('full', 'all'), work_calendar: R('full', 'team'),
@@ -131,7 +131,7 @@ export const defaultMatrix = {
     audit_log: R('read', 'all'),
     notifications: R('read', 'all'),
     devices: R('read', 'all'), sims: R('read', 'all'), proxies: R('read', 'all'), mail_accounts: R('read', 'all'), farms: R('read', 'all'),
-    clients: R('read', 'all'),
+    clients: R('read', 'all'), client_maps: R('read', 'all'),
   },
 
   // Аналітик читає цифри, але не сейф: інакше «read all» тихо відкриває креди.

@@ -7,6 +7,21 @@
 <title>Gennect CRM</title>
 <link rel="stylesheet" href="styles.css">
 <script src="js/theme-init.js"></script>
+<!-- Import map для мап «Підключення клієнта» (Excalidraw-канва): фіксує
+     одну спільну версію react/react-dom, щоб esm.sh не тягнув по своїй
+     копії на кожен пакет — інакше хуки й контекст Excalidraw ламаються.
+     Сам файл нічого не качає, доки жодна сторінка не імпортує ці
+     специфікатори — для решти CRM це порожній рядок. -->
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@19.0.0",
+    "react/jsx-runtime": "https://esm.sh/react@19.0.0/jsx-runtime",
+    "react-dom": "https://esm.sh/react-dom@19.0.0",
+    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client"
+  }
+}
+</script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236c8cff' stroke-width='2' stroke-linecap='round'><path d='M4 19V11'/><path d='M10 19V5'/><path d='M16 19v-6'/><path d='M22 19H2'/></svg>">
 </head>
 <body>
