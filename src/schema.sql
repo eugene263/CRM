@@ -1020,3 +1020,105 @@ CREATE TABLE IF NOT EXISTS client_status_history (
   user_id INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ── «Задачі»: незалежні від «Команд» простори (Spaces) зі своїм довільним
+-- списком учасників (task_space_members), кожен простір — кілька робочих
+-- дошок (task_boards), на дошці — свої створювані/редаговані/видалювані
+-- колонки (task_columns), у колонках — картки-задачі (task_cards).
+-- Видалення простору/дошки/колонки блокується, поки в них є вкладене
+-- (той самий принцип, що в client_maps/message_templates) — картку ж
+-- можна видалити напряму, коментарі/файли/тайм-записи/активність під нею
+-- підуть каскадом, бо самі по собі, без картки, сенсу не мають.
+CREATE TABLE IF NOT EXISTS task_spaces (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS task_space_members (
+  id INTEGER PRIMARY KEY,
+  space_id INTEGER NOT NULL REFERENCES task_spaces(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_space_members_space ON task_space_members(space_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_task_space_members ON task_space_members(space_id, user_id);
+
+CREATE TABLE IF NOT EXISTS task_boards (
+  id INTEGER PRIMARY KEY,
+  space_id INTEGER NOT NULL REFERENCES task_spaces(id),
+  name TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_boards_space ON task_boards(space_id);
+
+CREATE TABLE IF NOT EXISTS task_columns (
+  id INTEGER PRIMARY KEY,
+  board_id INTEGER NOT NULL REFERENCES task_boards(id),
+  name TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_columns_board ON task_columns(board_id);
+
+CREATE TABLE IF NOT EXISTS task_cards (
+  id INTEGER PRIMARY KEY,
+  board_id INTEGER NOT NULL REFERENCES task_boards(id) ON DELETE CASCADE,
+  column_id INTEGER NOT NULL REFERENCES task_columns(id),
+  title TEXT NOT NULL,
+  description TEXT,
+  due_date TEXT,
+  priority TEXT,
+  assignee_user_id INTEGER REFERENCES users(id),
+  tags TEXT,
+  board_order REAL NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_task_cards_board ON task_cards(board_id, column_id);
+
+CREATE TABLE IF NOT EXISTS task_comments (
+  id INTEGER PRIMARY KEY,
+  card_id INTEGER NOT NULL REFERENCES task_cards(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id),
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_comments_card ON task_comments(card_id);
+
+CREATE TABLE IF NOT EXISTS task_attachments (
+  id INTEGER PRIMARY KEY,
+  card_id INTEGER NOT NULL REFERENCES task_cards(id) ON DELETE CASCADE,
+  comment_id INTEGER REFERENCES task_comments(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  mime TEXT,
+  content TEXT NOT NULL, -- base64, той самий підхід, що payout_reports
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_attachments_card ON task_attachments(card_id);
+
+CREATE TABLE IF NOT EXISTS task_time_entries (
+  id INTEGER PRIMARY KEY,
+  card_id INTEGER NOT NULL REFERENCES task_cards(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  seconds INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_time_entries_card ON task_time_entries(card_id);
+
+CREATE TABLE IF NOT EXISTS task_activity (
+  id INTEGER PRIMARY KEY,
+  card_id INTEGER NOT NULL REFERENCES task_cards(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id),
+  kind TEXT NOT NULL,
+  payload TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_activity_card ON task_activity(card_id, created_at);

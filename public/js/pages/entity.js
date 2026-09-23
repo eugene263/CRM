@@ -14,6 +14,7 @@ import { renderMessageTemplates } from './messageTemplates.js';
 import { renderPayouts } from './payouts.js';
 import { renderFarms } from './farms.js';
 import { renderClientMapsPicker } from './clientMaps.js';
+import { renderTaskSpacesPicker } from './taskBoards.js';
 import { icon, withIcon } from '../icons.js';
 
 const PAGE = 50;
@@ -128,6 +129,9 @@ export async function renderEntity(entKey) {
   if (entKey === 'farms') return renderFarms();
   // Підключення клієнта — пікер клієнтів; сама канва живе на #/map/:id.
   if (entKey === 'client_maps') return renderClientMapsPicker();
+  // Задачі — пікер просторів; самі простір/дошка живуть на #/space/:id і
+  // #/board/:id (свій канбан із редагованими колонками).
+  if (entKey === 'task_spaces') return renderTaskSpacesPicker();
   return renderEntityTable(entKey);
 }
 

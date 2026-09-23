@@ -45,6 +45,10 @@ export const defaultMatrix = {
     ...spread(RESOURCE, R('write', 'team')),
     prospect_lists: R('full', 'team'), leads: R('full', 'team'), touches: R('read', 'team'),
     clients: R('full', 'team'), client_maps: R('full', 'team'),
+    // 'own' тут означає не «створене мною», а «простір, у якому я учасник» —
+    // саму фільтрацію робить src/taskBoards.js, а не generic scopeWhere
+    // (у task_spaces нема одного власника чи прив'язки до команди).
+    task_spaces: R('full', 'own'),
     message_templates: R('full', 'all'), scripts: R('full', 'all'), lead_statuses: R('write', 'all'), dictionaries: R('write', 'all'),
     suppression_list: R('full', 'all'),
     kpi_plans: R('full', 'team'), channel_limits: R('full', 'all'), work_calendar: R('full', 'team'),
@@ -70,6 +74,7 @@ export const defaultMatrix = {
 
   creator: {
     ...VAULT_SELF,
+    task_spaces: R('full', 'own'),
     accounts: R('read', 'own'),
     posts: R('full', 'own'),
     creatives: R('write', 'own'),
@@ -86,6 +91,7 @@ export const defaultMatrix = {
   sales: {
     ...VAULT_SELF,
     ...PROSPECTING_SELF,
+    task_spaces: R('full', 'own'),
     users: R('read', 'team'),
     teams: R('read', 'team'),
     notifications: R('read', 'own'),
@@ -95,6 +101,7 @@ export const defaultMatrix = {
 
   editor: {
     ...VAULT_SELF,
+    task_spaces: R('full', 'own'),
     creatives: R('write', 'all'),
     creative_versions: R('full', 'all'),
     tasks: R('write', 'own'),
@@ -106,6 +113,7 @@ export const defaultMatrix = {
 
   farmer: {
     ...spread(RESOURCE, R('full', 'all')),
+    task_spaces: R('full', 'own'),
     credentials: R('full', 'all'),
     credential_grants: R('read', 'all'),
     access_requests: R('write', 'own'),

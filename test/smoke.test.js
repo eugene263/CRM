@@ -1821,3 +1821,227 @@ test('крієйтор не бачить «Підключення клієнта
   const finCreate = await call(`/api/client_maps/${rootId}/children`, { method: 'POST', as: 'finance', body: { name: 'x' } });
   assert.equal(finCreate.status, 403);
 });
+
+// ── «Задачі»: простори → дошки → колонки → картки ──────────────────────────
+async function makeSpace(name = `Простір ${Date.now()}`) {
+  const res = await call('/api/task_spaces', { method: 'POST', body: { name } });
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  return res.data.id;
+}
+async function makeBoard(spaceId, name = 'Дошка') {
+  const res = await call(`/api/task_spaces/${spaceId}/boards`, { method: 'POST', body: { name } });
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  return res.data.id;
+}
+const dataUrl = (text, mime = 'text/plain') => `data:${mime};base64,${Buffer.from(text).toString('base64')}`;
+
+test('простір створюється зі своїм списком учасників — творець одразу учасник', async () => {
+  const spaceId = await makeSpace();
+  const space = await call(`/api/task_spaces/${spaceId}`);
+  assert.equal(space.status, 200, JSON.stringify(space.data));
+  assert.equal(space.data.members.length, 1);
+  const list = await call('/api/task_spaces');
+  assert.ok(list.data.rows.some((s) => s.id === spaceId));
+});
+
+test('поза списком учасників простір недоступний, після додавання — доступний', async () => {
+  const spaceId = await makeSpace();
+  const denied = await call(`/api/task_spaces/${spaceId}`, { as: 'creator' });
+  assert.equal(denied.status, 403, JSON.stringify(denied.data));
+
+  const creatorId = (await call('/api/refs')).data.users.find((u) => u.label.includes('Ліза')).id;
+  const added = await call(`/api/task_spaces/${spaceId}/members`, { method: 'POST', body: { user_id: creatorId } });
+  assert.equal(added.status, 200, JSON.stringify(added.data));
+
+  const allowed = await call(`/api/task_spaces/${spaceId}`, { as: 'creator' });
+  assert.equal(allowed.status, 200, 'після додавання в учасники доступ є');
+
+  const removed = await call(`/api/task_spaces/${spaceId}/members/${creatorId}`, { method: 'DELETE' });
+  assert.equal(removed.status, 200);
+  const deniedAgain = await call(`/api/task_spaces/${spaceId}`, { as: 'creator' });
+  assert.equal(deniedAgain.status, 403, 'після видалення з учасників доступу знову нема');
+});
+
+test('фінансист узагалі не бачить розділ «Задачі»', async () => {
+  const spaceId = await makeSpace();
+  assert.equal((await call('/api/task_spaces', { as: 'finance' })).status, 403);
+  assert.equal((await call(`/api/task_spaces/${spaceId}`, { as: 'finance' })).status, 403);
+});
+
+test('нова дошка отримує три дефолтні колонки', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const board = await call(`/api/task_boards/${boardId}`);
+  assert.equal(board.status, 200, JSON.stringify(board.data));
+  assert.deepEqual(board.data.columns.map((c) => c.name), ['До виконання', 'В роботі', 'Готово']);
+});
+
+test('видалення простору й дошки блокується, поки в них є вкладене', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const busySpace = await call(`/api/task_spaces/${spaceId}`, { method: 'DELETE' });
+  assert.equal(busySpace.status, 409);
+
+  const board = await call(`/api/task_boards/${boardId}`);
+  const colId = board.data.columns[0].id;
+  const busyBoard = await call(`/api/task_boards/${boardId}`, { method: 'DELETE' });
+  assert.equal(busyBoard.status, 409);
+
+  // Спорожняємо: видаляємо всі колонки, тоді дошку, тоді простір.
+  for (const c of board.data.columns) assert.equal((await call(`/api/task_columns/${c.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await call(`/api/task_boards/${boardId}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await call(`/api/task_spaces/${spaceId}`, { method: 'DELETE' })).status, 200);
+  void colId;
+});
+
+test('колонку з картками не видалити, порожню — можна', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const board = await call(`/api/task_boards/${boardId}`);
+  const colId = board.data.columns[0].id;
+  const card = await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } });
+  assert.equal(card.status, 200, JSON.stringify(card.data));
+
+  const busy = await call(`/api/task_columns/${colId}`, { method: 'DELETE' });
+  assert.equal(busy.status, 409);
+  assert.equal((await call(`/api/task_cards/${card.data.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await call(`/api/task_columns/${colId}`, { method: 'DELETE' })).status, 200);
+});
+
+test('картка переноситься між колонками — активність фіксує переміщення', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const board = await call(`/api/task_boards/${boardId}`);
+  const [colA, colB] = board.data.columns;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colA.id, title: 'Задача' } })).data;
+
+  const moved = await call(`/api/task_cards/${card.id}/move`, { method: 'POST', body: { column_id: colB.id, board_order: 500 } });
+  assert.equal(moved.status, 200, JSON.stringify(moved.data));
+
+  const got = await call(`/api/task_cards/${card.id}`);
+  assert.equal(got.data.card.column_id, colB.id);
+  const kinds = got.data.activity.map((a) => a.kind);
+  assert.deepEqual(kinds, ['created', 'moved']);
+  const movedPayload = JSON.parse(got.data.activity[1].payload);
+  assert.equal(movedPayload.from, colA.name);
+  assert.equal(movedPayload.to, colB.name);
+});
+
+test('редагування картки логує кожну змінену властивість окремо', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+
+  const upd = await call(`/api/task_cards/${card.id}`, {
+    method: 'PUT', body: { title: 'Нова назва', priority: 'high', tags: 'терміново, важливо', description: 'опис' },
+  });
+  assert.equal(upd.status, 200, JSON.stringify(upd.data));
+
+  const got = await call(`/api/task_cards/${card.id}`);
+  assert.equal(got.data.card.title, 'Нова назва');
+  assert.equal(got.data.card.priority, 'high');
+  const kinds = got.data.activity.map((a) => a.kind);
+  // created + 4 окремі field_changed (title/priority/tags/description).
+  assert.equal(kinds.filter((k) => k === 'field_changed').length, 4);
+
+  // Повторний PUT з тими самими значеннями нічого не додає в лог.
+  await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { title: 'Нова назва' } });
+  const gotAgain = await call(`/api/task_cards/${card.id}`);
+  assert.equal(gotAgain.data.activity.length, got.data.activity.length, 'без реальної зміни новий запис не додається');
+});
+
+test('призначення виконавця обмежене учасниками простору й логується окремо', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+
+  const got = await call(`/api/task_cards/${card.id}`);
+  const me = got.data.members[0];
+  const assign = await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { assignee_user_id: me.user_id } });
+  assert.equal(assign.status, 200, JSON.stringify(assign.data));
+
+  const after = await call(`/api/task_cards/${card.id}`);
+  assert.equal(after.data.card.assignee_user_id, me.user_id);
+  assert.ok(after.data.activity.some((a) => a.kind === 'assigned'));
+});
+
+test('трекер часу стартує й зупиняється, рахує секунди, редагування змінює тривалість', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+
+  const start = await call(`/api/task_cards/${card.id}/timer/start`, { method: 'POST' });
+  assert.equal(start.status, 200, JSON.stringify(start.data));
+  const mid = await call(`/api/task_cards/${card.id}`);
+  assert.ok(mid.data.runningTimer, 'таймер видно як запущений для того ж користувача');
+
+  const stop = await call(`/api/task_cards/${card.id}/timer/stop`, { method: 'POST' });
+  assert.equal(stop.status, 200, JSON.stringify(stop.data));
+  assert.ok(stop.data.seconds >= 0);
+
+  const after = await call(`/api/task_cards/${card.id}`);
+  assert.equal(after.data.runningTimer, null);
+  assert.equal(after.data.timeEntries.length, 1);
+  assert.ok(after.data.activity.some((a) => a.kind === 'time_started'));
+  assert.ok(after.data.activity.some((a) => a.kind === 'time_stopped'));
+
+  const entryId = after.data.timeEntries[0].id;
+  const edited = await call(`/api/task_time_entries/${entryId}`, { method: 'PUT', body: { seconds: 1800 } });
+  assert.equal(edited.status, 200, JSON.stringify(edited.data));
+  const final = await call(`/api/task_cards/${card.id}`);
+  assert.equal(final.data.timeEntries[0].seconds, 1800);
+  assert.equal(final.data.totalSeconds, 1800);
+});
+
+test('коментар із файлом додається, активність фіксує коментар', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+
+  const commented = await call(`/api/task_cards/${card.id}/comments`, {
+    method: 'POST',
+    body: { body: 'Готово, дивись файл', attachments: [{ file_name: 'звіт.txt', mime: 'text/plain', content: dataUrl('привіт') }] },
+  });
+  assert.equal(commented.status, 200, JSON.stringify(commented.data));
+
+  const got = await call(`/api/task_cards/${card.id}`);
+  assert.equal(got.data.comments.length, 1);
+  assert.equal(got.data.comments[0].body, 'Готово, дивись файл');
+  assert.equal(got.data.comments[0].attachments.length, 1);
+  assert.equal(got.data.comments[0].attachments[0].file_name, 'звіт.txt');
+  assert.ok(got.data.activity.some((a) => a.kind === 'commented'));
+
+  const fileId = got.data.comments[0].attachments[0].id;
+  const file = await call(`/api/task_attachments/${fileId}/file`);
+  assert.equal(file.status, 200);
+  assert.equal(file.data, 'привіт');
+});
+
+test('завеликий файл у коментарі відхиляється', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+
+  const huge = await call(`/api/task_cards/${card.id}/comments`, {
+    method: 'POST',
+    body: { body: 'x', attachments: [{ file_name: 'великий.bin', content: dataUrl('A'.repeat(9 * 1024 * 1024)) }] },
+  });
+  assert.equal(huge.status, 413, JSON.stringify(huge.data));
+});
+
+test('видалення картки прибирає її з дошки; на видалену картку — 404', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+
+  assert.equal((await call(`/api/task_cards/${card.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await call(`/api/task_cards/${card.id}`)).status, 404);
+  const board = await call(`/api/task_boards/${boardId}`);
+  assert.ok(!board.data.columns.some((c) => c.cards.some((x) => x.id === card.id)));
+});

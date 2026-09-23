@@ -13,6 +13,7 @@ import { renderPlans } from './pages/plans.js';
 import { renderListDetailPage } from './pages/prospectLists.js';
 import { renderTemplateCardPage } from './pages/messageTemplates.js';
 import { renderMapCanvas } from './pages/clientMaps.js';
+import { renderTaskSpace, renderTaskBoard } from './pages/taskBoards.js';
 import { mountAiButton } from './aiChat.js';
 
 export const state = {
@@ -206,6 +207,8 @@ async function route() {
     else if (section === 'list') node = await renderListDetailPage(Number(arg));
     else if (section === 'template') node = await renderTemplateCardPage(Number(arg));
     else if (section === 'map') node = await renderMapCanvas(Number(arg));
+    else if (section === 'space') node = await renderTaskSpace(Number(arg));
+    else if (section === 'board') node = await renderTaskBoard(Number(arg));
     else if (section === 'analytics') node = await renderAnalytics();
     else if (section === 'finance') node = await renderFinance();
     else if (section === 'profile') node = await renderProfile();
@@ -217,7 +220,7 @@ async function route() {
     view.append(node);
     $('#page-title').textContent = section === 'e' ? (state.meta[arg]?.label || 'Розділ')
       : { analytics: 'Аналітика', finance: 'Фінанси', profile: 'Профіль', roles: 'Ролі та права', prospecting: 'Пошук клієнтів', plans: 'Плани та норми', list: 'Список пошуку',
-        template: 'Шаблони повідомлень', map: 'Підключення клієнта' }[section] || 'Дашборд';
+        template: 'Шаблони повідомлень', map: 'Підключення клієнта', space: 'Простір задач', board: 'Дошка задач' }[section] || 'Дашборд';
   } catch (err) {
     view.textContent = '';
     view.append(el('div', { class: 'card' }, el('div', { class: 'error' }, err.message)));

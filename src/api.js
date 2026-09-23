@@ -14,6 +14,7 @@ import * as costing from './costing.js';
 import * as payouts from './payouts.js';
 import * as farms from './farms.js';
 import * as clientMaps from './clientMaps.js';
+import * as taskBoards from './taskBoards.js';
 import * as scripts from './scripts.js';
 import * as clients from './clients.js';
 import { encrypt, decrypt, token, hashIp } from './crypto.js';
@@ -955,6 +956,148 @@ export async function handleApi(req, res, url) {
       return ok(res, await clientMaps.createChild(user, mapId, body.name));
     }
     return fail(res, 405, 'Метод не підтримується');
+  }
+
+  // ── «Задачі»: простори → дошки → колонки → картки ──────────────────────
+  // Усе гейтиться через право на 'task_spaces' (єдина зареєстрована
+  // сутність) — сам доступ до КОНКРЕТНОГО простору перевіряє taskBoards.js
+  // за членством, а не generic scopeWhere. Помилки з .status від
+  // taskBoards.js (403/404/409) прокидаються як є.
+  if (seg[0] === 'task_spaces' && !seg[1]) {
+    if (!can(user, 'task_spaces', 'read')) return fail(res, 403, 'Немає доступу до задач');
+    if (req.method === 'GET') return ok(res, { rows: await taskBoards.listSpaces(user) });
+    if (req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'create')) return fail(res, 403, 'Немає прав створювати простори');
+      const body = await readBody(req);
+      return ok(res, await taskBoards.createSpace(user, body.name));
+    }
+    return fail(res, 405, 'Метод не підтримується');
+  }
+  if (seg[0] === 'task_spaces' && seg[1] && !Number.isNaN(Number(seg[1]))) {
+    if (!can(user, 'task_spaces', 'read')) return fail(res, 403, 'Немає доступу до задач');
+    const spaceId = Number(seg[1]);
+    if (!seg[2] && req.method === 'GET') return ok(res, await taskBoards.getSpace(user, spaceId));
+    if (!seg[2] && req.method === 'PUT') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати простір');
+      return ok(res, await taskBoards.renameSpace(user, spaceId, (await readBody(req)).name));
+    }
+    if (!seg[2] && req.method === 'DELETE') {
+      if (!can(user, 'task_spaces', 'delete')) return fail(res, 403, 'Немає прав видаляти простори');
+      return ok(res, await taskBoards.deleteSpace(user, spaceId));
+    }
+    if (seg[2] === 'members' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати учасників');
+      return ok(res, await taskBoards.addMember(user, spaceId, (await readBody(req)).user_id));
+    }
+    if (seg[2] === 'members' && seg[3] && req.method === 'DELETE') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати учасників');
+      return ok(res, await taskBoards.removeMember(user, spaceId, seg[3]));
+    }
+    if (seg[2] === 'boards' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'create')) return fail(res, 403, 'Немає прав створювати дошки');
+      return ok(res, await taskBoards.createBoard(user, spaceId, (await readBody(req)).name));
+    }
+    return fail(res, 405, 'Метод не підтримується');
+  }
+  if (seg[0] === 'task_boards' && seg[1] && !Number.isNaN(Number(seg[1]))) {
+    if (!can(user, 'task_spaces', 'read')) return fail(res, 403, 'Немає доступу до задач');
+    const boardId = Number(seg[1]);
+    if (!seg[2] && req.method === 'GET') return ok(res, await taskBoards.getBoard(user, boardId));
+    if (!seg[2] && req.method === 'PUT') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати дошку');
+      return ok(res, await taskBoards.renameBoard(user, boardId, (await readBody(req)).name));
+    }
+    if (!seg[2] && req.method === 'DELETE') {
+      if (!can(user, 'task_spaces', 'delete')) return fail(res, 403, 'Немає прав видаляти дошки');
+      return ok(res, await taskBoards.deleteBoard(user, boardId));
+    }
+    if (seg[2] === 'columns' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'create')) return fail(res, 403, 'Немає прав створювати колонки');
+      return ok(res, await taskBoards.createColumn(user, boardId, (await readBody(req)).name));
+    }
+    if (seg[2] === 'cards' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'create')) return fail(res, 403, 'Немає прав створювати картки');
+      const body = await readBody(req);
+      return ok(res, await taskBoards.createCard(user, boardId, body.column_id, body.title));
+    }
+    return fail(res, 405, 'Метод не підтримується');
+  }
+  if (seg[0] === 'task_columns' && seg[1] && !Number.isNaN(Number(seg[1]))) {
+    const columnId = Number(seg[1]);
+    if (req.method === 'PUT') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати колонку');
+      const body = await readBody(req);
+      if ('name' in body) await taskBoards.renameColumn(user, columnId, body.name);
+      if ('sort_order' in body) await taskBoards.reorderColumn(user, columnId, body.sort_order);
+      return ok(res, { ok: true });
+    }
+    if (req.method === 'DELETE') {
+      if (!can(user, 'task_spaces', 'delete')) return fail(res, 403, 'Немає прав видаляти колонки');
+      return ok(res, await taskBoards.deleteColumn(user, columnId));
+    }
+    return fail(res, 405, 'Метод не підтримується');
+  }
+  if (seg[0] === 'task_cards' && seg[1] && !Number.isNaN(Number(seg[1]))) {
+    if (!can(user, 'task_spaces', 'read')) return fail(res, 403, 'Немає доступу до задач');
+    const cardId = Number(seg[1]);
+    if (!seg[2] && req.method === 'GET') return ok(res, await taskBoards.getCard(user, cardId));
+    if (!seg[2] && req.method === 'PUT') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати картку');
+      return ok(res, await taskBoards.updateCard(user, cardId, await readBody(req)));
+    }
+    if (!seg[2] && req.method === 'DELETE') {
+      if (!can(user, 'task_spaces', 'delete')) return fail(res, 403, 'Немає прав видаляти картки');
+      return ok(res, await taskBoards.deleteCard(user, cardId));
+    }
+    if (seg[2] === 'move' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав переміщувати картки');
+      const body = await readBody(req);
+      return ok(res, await taskBoards.moveCard(user, cardId, body.column_id, body.board_order));
+    }
+    if (seg[2] === 'comments' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'create')) return fail(res, 403, 'Немає прав коментувати');
+      const body = await readBody(req, 12 * 1024 * 1024);
+      return ok(res, await taskBoards.addComment(user, cardId, body.body, body.attachments));
+    }
+    if (seg[2] === 'attachments' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'create')) return fail(res, 403, 'Немає прав додавати файли');
+      const body = await readBody(req, 12 * 1024 * 1024);
+      return ok(res, await taskBoards.addAttachment(user, cardId, body));
+    }
+    if (seg[2] === 'timer' && seg[3] === 'start' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав вести таймер');
+      return ok(res, await taskBoards.startTimer(user, cardId));
+    }
+    if (seg[2] === 'timer' && seg[3] === 'stop' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав вести таймер');
+      return ok(res, await taskBoards.stopTimer(user, cardId));
+    }
+    return fail(res, 405, 'Метод не підтримується');
+  }
+  if (seg[0] === 'task_comments' && seg[1] && req.method === 'DELETE') {
+    if (!can(user, 'task_spaces', 'delete')) return fail(res, 403, 'Немає прав видаляти коментарі');
+    return ok(res, await taskBoards.deleteComment(user, Number(seg[1])));
+  }
+  if (seg[0] === 'task_attachments' && seg[1] && !Number.isNaN(Number(seg[1]))) {
+    if (!can(user, 'task_spaces', 'read')) return fail(res, 403, 'Немає доступу до задач');
+    const attachmentId = Number(seg[1]);
+    if (seg[2] === 'file' && req.method === 'GET') {
+      const file = await taskBoards.getAttachmentFile(user, attachmentId);
+      return send(res, 200, file.buffer, {
+        'content-type': file.mime || 'application/octet-stream',
+        'content-disposition': `inline; filename="${encodeURIComponent(file.name)}"`,
+      });
+    }
+    if (!seg[2] && req.method === 'DELETE') {
+      if (!can(user, 'task_spaces', 'delete')) return fail(res, 403, 'Немає прав видаляти файли');
+      return ok(res, await taskBoards.deleteAttachment(user, attachmentId));
+    }
+    return fail(res, 405, 'Метод не підтримується');
+  }
+  if (seg[0] === 'task_time_entries' && seg[1] && req.method === 'PUT') {
+    if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати трекер часу');
+    const body = await readBody(req);
+    return ok(res, await taskBoards.editTimeEntry(user, Number(seg[1]), body.seconds));
   }
 
   // --- клієнти ---
