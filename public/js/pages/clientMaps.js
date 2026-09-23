@@ -17,6 +17,19 @@ import { icon, withIcon } from '../icons.js';
 const EXCALIDRAW_VERSION = '0.18.0';
 const REACT_VERSION = '19.0.0';
 
+// Кольори картки-посилання на дочірню мапу: перший — акцентний колір
+// самого CRM (щоб картки виглядали частиною інтерфейсу), решта —
+// кольорові варіанти на вибір, як стікери в Miro. Пастельне тло +
+// насичена рамка — та сама мова, що й акцентні кольори по всій CRM.
+const CARD_COLORS = [
+  { key: 'accent', label: 'CRM', bg: '#e9edfc', stroke: '#6c8cff' },
+  { key: 'yellow', label: 'Жовтий', bg: '#fff3bf', stroke: '#f2b705' },
+  { key: 'pink', label: 'Рожевий', bg: '#ffe3ec', stroke: '#f06595' },
+  { key: 'green', label: 'Зелений', bg: '#e6fcf5', stroke: '#12b886' },
+  { key: 'orange', label: 'Помаранчевий', bg: '#fff0e6', stroke: '#e8590c' },
+  { key: 'purple', label: 'Фіолетовий', bg: '#f3f0ff', stroke: '#845ef7' },
+];
+
 let libsPromise = null;
 function loadExcalidraw() {
   if (!libsPromise) {
@@ -174,18 +187,46 @@ export async function renderMapCanvas(mapId) {
   // Нова вкладена мапа: створює рядок у дереві на бекенді, а картку-
   // посилання на канві збирає офіційним способом Excalidraw
   // (convertToExcalidrawElements) — самі не рахуємо схему елемента.
+  function colorPicker(defaultKey = 'accent') {
+    let picked = defaultKey;
+    const dots = CARD_COLORS.map((c) => {
+      const dot = el('button', {
+        type: 'button', title: c.label,
+        style: `width:28px;height:28px;border-radius:50%;background:${c.bg};`
+          + `border:2px solid ${c.key === picked ? c.stroke : 'transparent'};box-shadow:inset 0 0 0 1px ${c.stroke};cursor:pointer`,
+        onclick: () => {
+          picked = c.key;
+          for (const [i, other] of CARD_COLORS.entries()) {
+            wrap.children[i].style.borderColor = other.key === picked ? other.stroke : 'transparent';
+          }
+        },
+      });
+      return dot;
+    });
+    const wrap = el('div', { class: 'row tight', style: 'gap:8px' }, ...dots);
+    return { node: wrap, get value() { return CARD_COLORS.find((c) => c.key === picked) || CARD_COLORS[0]; } };
+  }
+
+  // Картка-посилання на дочірню мапу: колір обирає людина в момент
+  // створення (за замовчуванням — акцентний колір CRM), а саму схему
+  // елемента збирає офіційна функція Excalidraw (convertToExcalidrawElements),
+  // не ми — там купа обовʼязкових полів, які краще не рахувати вручну.
   function addChildModal() {
     const input = el('input', { placeholder: 'Наприклад: Ферма UA-1' });
-    const box = modal('Нова вкладена мапа', el('div', { class: 'field' }, el('label', {}, 'Назва'), input),
+    const picker = colorPicker();
+    const box = modal('Нова вкладена мапа', el('div', {},
+      el('div', { class: 'field' }, el('label', {}, 'Назва'), input),
+      el('div', { class: 'field' }, el('label', {}, 'Колір картки'), picker.node)),
       [actionButton('Створити', async () => {
         if (!input.value.trim()) return toast('Потрібна назва', true);
         try {
           const { id, index } = await api.post(`/client_maps/${node.id}/children`, { name: input.value.trim() });
           const col = index % 4, row2 = Math.floor(index / 4);
+          const color = picker.value;
           const [skeletonEl] = ExcalidrawLib.convertToExcalidrawElements([{
-            type: 'rectangle', x: 60 + col * 260, y: 60 + row2 * 160, width: 220, height: 100,
-            backgroundColor: '#e9edfc', strokeColor: '#6c8cff', roundness: { type: 3 },
-            label: { text: input.value.trim(), fontSize: 16 },
+            type: 'rectangle', x: 60 + col * 240, y: 60 + row2 * 200, width: 200, height: 160,
+            backgroundColor: color.bg, strokeColor: color.stroke, roundness: { type: 3 },
+            label: { text: input.value.trim(), fontSize: 18 },
             link: `#/map/${id}`,
           }]);
           const current = excalidrawAPI.getSceneElements();
