@@ -51,6 +51,18 @@ function formatHMS(total) {
 }
 const fmtDate = (v) => (v ? String(v).slice(0, 16).replace('T', ' ') : '—');
 
+// Прогрес-бар «скільки натрекано з estimate» — модульного рівня, бо
+// потрібен і в повній картці (над таблицею полів), і на плашці картки в
+// канбані (compact); коли estimate не заданий — просто нічого не показуємо.
+function progressBarNode(totalSeconds, estimateMinutes, compact = false) {
+  if (!estimateMinutes) return null;
+  const pct = Math.round(((totalSeconds || 0) / (estimateMinutes * 60)) * 100);
+  const clamped = Math.min(100, Math.max(0, pct));
+  return el('div', { class: `task-progress${compact ? ' compact' : ''}${pct > 100 ? ' over' : ''}`, title: `Натрекано ${formatSeconds(totalSeconds || 0)} з оцінки ${formatSeconds(estimateMinutes * 60)}` },
+    el('div', { class: 'task-progress-track' }, el('div', { class: 'task-progress-fill', style: `width:${clamped}%` })),
+    el('span', { class: 'task-progress-pct' }, `${pct}%`));
+}
+
 // Аватарка — кружечок з ініціалами й кольором за id людини (фотографій
 // профілю в системі нема, і робити їх заради цього не варто).
 const AVATAR_COLORS = ['#6c8cff', '#f2b705', '#f06595', '#12b886', '#e8590c', '#845ef7', '#20a97f', '#4263eb'];
@@ -90,17 +102,26 @@ function openPopover(anchor, build) {
     return null;
   }
   const rect = anchor.getBoundingClientRect();
-  const box = el('div', { class: 'task-popover', style: `top:${rect.bottom + 4}px;visibility:hidden` });
+  const box = el('div', { class: 'task-popover', style: 'visibility:hidden' });
   build(box, () => box.remove());
   document.body.append(box);
   anchor._popoverBox = box;
-  // Позиціонування по горизонталі: за замовчуванням ліва межа попапу = ліва
-  // межа кнопки, але якщо кнопка близько до правого краю екрана (як
-  // «Фільтри»/«Виконавці» в шапці дошки) і попап так вилазить за край —
-  // приліплюємо ПРАВУ межу попапу до правої межі кнопки, він росте вліво.
+  // Позиціонування завжди в межах екрана по обох осях — інакше біля країв
+  // (наприклад «+» у глибоко вкладеному спадному списку внизу сторінки)
+  // попап вилітав за viewport і ставав недосяжним для кліків.
+  // По горизонталі: за замовчуванням ліва межа попапу = ліва межа кнопки,
+  // а якщо так вилазить за правий край — приліплюємо ПРАВУ межу попапу до
+  // правої межі кнопки, він росте вліво.
   const boxWidth = box.offsetWidth;
   const left = (rect.left + boxWidth > window.innerWidth - 8) ? Math.max(8, rect.right - boxWidth) : rect.left;
+  // По вертикалі: за замовчуванням під кнопкою, а якщо так вилазить за
+  // нижній край — розкриваємо ВГОРУ від кнопки замість вниз.
+  const boxHeight = box.offsetHeight;
+  const top = (rect.bottom + 4 + boxHeight > window.innerHeight - 8)
+    ? Math.max(8, rect.top - boxHeight - 4)
+    : rect.bottom + 4;
   box.style.left = `${left}px`;
+  box.style.top = `${top}px`;
   box.style.visibility = '';
   const close = (e) => { if (!box.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) { box.remove(); document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
@@ -109,6 +130,16 @@ function openPopover(anchor, build) {
 
 let uidCounter = 0;
 const uid = () => `u${Date.now().toString(36)}${(uidCounter += 1)}`;
+
+// Нативний <input type=date|time> відкриває календарик по кліку тільки на
+// власну малесеньку іконку в правому краї — клік будь-де в полі його НЕ
+// відкриває. showPicker() відкриває його з будь-якого кліку по полю
+// (старі браузери без підтримки — просто ігноруємо, поле лишається
+// звичайним текстовим введенням).
+function withPicker(input) {
+  input.addEventListener('click', () => { try { input.showPicker(); } catch { /* немає підтримки — ок */ } });
+  return input;
+}
 
 // Рядок попапу з чекбоксом — клікабельна ВСЯ плашка (не тільки сам
 // квадратик чекбокса): клік будь-де в рядку перемикає чекбокс і викликає
@@ -208,8 +239,8 @@ function buildDatesField(card, onSet, { compact = false } = {}) {
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     openPopover(btn, (box2) => {
-      const startInput = el('input', { type: 'date', value: card.start_date || '', onchange: () => onSet({ start_date: startInput.value || null }) });
-      const dueInput = el('input', { type: 'date', value: card.due_date || '', onchange: () => onSet({ due_date: dueInput.value || null }) });
+      const startInput = withPicker(el('input', { type: 'date', value: card.start_date || '', onchange: () => onSet({ start_date: startInput.value || null }) }));
+      const dueInput = withPicker(el('input', { type: 'date', value: card.due_date || '', onchange: () => onSet({ due_date: dueInput.value || null }) }));
       box2.append(
         el('div', { class: 'task-popover-item', style: 'cursor:default' }, el('span', { class: 'muted', style: 'width:32px' }, 'З'), startInput),
         el('div', { class: 'task-popover-item', style: 'cursor:default' }, el('span', { class: 'muted', style: 'width:32px' }, 'До'), dueInput));
@@ -465,27 +496,100 @@ function colLetter(i) {
 // Таблиця — без кнопок «+ рядок/стовпець»: наведення на клітинку показує
 // маленькі приглушені хендли по кутах (верх-право = додати колонку
 // праворуч, з підсвіткою колонки; верх-ліво ПЕРШОЇ колонки = додати рядок
-// вище, з підсвіткою рядка, а для решти колонок той самий кут — видалити
+// вище, з підсвіткою рядка, а для решти колонок той самий кут = видалити
 // колонку; низ-ліво першої колонки = видалити рядок). Наведення на всю
 // таблицю показує зверху літери колонок і зліва номери рядків (Excel-
-// стиль) — перетягуючи за літеру/номер, можна переставити колонку/рядок
-// у будь-яке місце.
+// стиль) — АЛЕ як overlay (position: absolute поверх таблиці, без жодного
+// зарезервованого місця в layout: за замовчуванням цього рядка/колонки в
+// потоці документа просто нема, вони з'являються ПОВЕРХ елементів лише на
+// hover). Перетягуючи за літеру/номер — лінія між колонками/рядками
+// показує, куди саме впаде колонка чи рядок.
 function renderTable(b, scheduleSave) {
   if (!b.rows?.length) b.rows = [['', ''], ['', '']];
   const wrapTable = el('div', { class: 'desc-table-wrap' });
+  const letterBar = el('div', { class: 'desc-table-letterbar' });
+  const numBar = el('div', { class: 'desc-table-numbar' });
   let draggingCol = null;
   let draggingRow = null;
-  function moveArrItem(arr, from, to) { const [item] = arr.splice(from, 1); arr.splice(to, 0, item); }
-  function moveColumn(from, to) { if (from === to) return; b.rows.forEach((row) => moveArrItem(row, from, to)); renderGrid(); scheduleSave(); }
-  function moveRow(from, to) { if (from === to) return; moveArrItem(b.rows, from, to); renderGrid(); scheduleSave(); }
+  function moveColumnTo(from, toIndex) {
+    const adj = toIndex > from ? toIndex - 1 : toIndex;
+    if (adj === from) return;
+    b.rows.forEach((row) => { const [item] = row.splice(from, 1); row.splice(adj, 0, item); });
+    renderGrid(); scheduleSave();
+  }
+  function moveRowTo(from, toIndex) {
+    const adj = toIndex > from ? toIndex - 1 : toIndex;
+    if (adj === from) return;
+    const [item] = b.rows.splice(from, 1);
+    b.rows.splice(adj, 0, item);
+    renderGrid(); scheduleSave();
+  }
+  // Фільтруємо саме .desc-table-letter/.desc-table-num — інакше вже
+  // вставлений indicator-рядок сам потрапляв би в підрахунок і зсував би
+  // індекс на наступному ж dragover/drop (був реальний баг: перетягування
+  // взагалі переставало щось переставляти після першого руху миші).
+  function colDropIndex(clientX) {
+    const cells = [...letterBar.children].filter((c) => c.classList.contains('desc-table-letter'));
+    let index = cells.length;
+    for (let i = 0; i < cells.length; i += 1) {
+      const r = cells[i].getBoundingClientRect();
+      if (clientX < r.left + r.width / 2) { index = i; break; }
+    }
+    return { cells, index };
+  }
+  function rowDropIndex(clientY) {
+    const cells = [...numBar.children].filter((c) => c.classList.contains('desc-table-num'));
+    let index = cells.length;
+    for (let i = 0; i < cells.length; i += 1) {
+      const r = cells[i].getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) { index = i; break; }
+    }
+    return { cells, index };
+  }
+  letterBar.addEventListener('dragover', (e) => {
+    if (draggingCol == null) return;
+    e.preventDefault();
+    const { cells, index } = colDropIndex(e.clientX);
+    letterBar.querySelectorAll('.desc-table-col-indicator').forEach((n) => n.remove());
+    const indicator = el('div', { class: 'desc-table-col-indicator' });
+    if (cells[index]) letterBar.insertBefore(indicator, cells[index]); else letterBar.append(indicator);
+  });
+  letterBar.addEventListener('drop', (e) => {
+    if (draggingCol == null) return;
+    e.preventDefault();
+    const { index } = colDropIndex(e.clientX);
+    moveColumnTo(draggingCol, index);
+    draggingCol = null;
+  });
+  numBar.addEventListener('dragover', (e) => {
+    if (draggingRow == null) return;
+    e.preventDefault();
+    const { cells, index } = rowDropIndex(e.clientY);
+    numBar.querySelectorAll('.desc-table-row-indicator').forEach((n) => n.remove());
+    const indicator = el('div', { class: 'desc-table-row-indicator' });
+    if (cells[index]) numBar.insertBefore(indicator, cells[index]); else numBar.append(indicator);
+  });
+  numBar.addEventListener('drop', (e) => {
+    if (draggingRow == null) return;
+    e.preventDefault();
+    const { index } = rowDropIndex(e.clientY);
+    moveRowTo(draggingRow, index);
+    draggingRow = null;
+  });
+
+  // currentTable — потрібен окремо від локальної const table у renderGrid():
+  // при САМОМУ першому виклику renderGrid() (з конструктора renderTable(),
+  // до того, як wrapTable взагалі приєднано до документа) getBoundingClientRect()
+  // на щойно створених <td> дає нулі (детач-елемент ще не має layout) —
+  // тому реальний перерахунок розмірів overlay-літер/номерів робимо на
+  // mouseenter (гарантовано вже в документі, є справжній layout), а не
+  // одразу під час рендеру.
+  let currentTable = null;
   function renderGrid() {
     wrapTable.textContent = '';
     const table = el('table', { class: 'desc-table' });
-    // table.rows[0] — рядок з літерами колонок, дані починаються з [1]; у
-    // кожному рядку даних child[0] — клітинка з номером рядка, реальні
-    // стовпці — з індексу 1. Обидва зсуви враховані нижче.
-    function highlightCol(ci, cls) { [...table.rows].slice(1).forEach((tr) => tr.children[ci + 1]?.classList.add(cls)); }
-    function highlightRow(ri, cls) { [...(table.rows[ri + 1]?.children || [])].forEach((td) => td.classList.add(cls)); }
+    function highlightCol(ci, cls) { [...table.rows].forEach((tr) => tr.children[ci]?.classList.add(cls)); }
+    function highlightRow(ri, cls) { [...(table.rows[ri]?.children || [])].forEach((td) => td.classList.add(cls)); }
     function clearHighlight() { table.querySelectorAll('td').forEach((td) => td.classList.remove('col-add-hl', 'col-del-hl', 'row-add-hl', 'row-del-hl')); }
     function handle(kind, corner, onEnter, onClick, title) {
       const btn = el('button', { type: 'button', class: `desc-table-handle ${kind} ${corner}`, title }, icon(kind === 'add' ? 'plus' : 'minus', 9));
@@ -495,25 +599,8 @@ function renderTable(b, scheduleSave) {
       return btn;
     }
 
-    const letterRow = el('tr', { class: 'desc-table-letters-row' }, el('td', { class: 'desc-table-corner' }));
-    b.rows[0].forEach((_, ci) => {
-      const cell = el('td', { class: 'desc-table-letter', draggable: 'true', title: 'Перетягніть, щоб перемістити колонку' }, colLetter(ci));
-      cell.addEventListener('dragstart', (e) => { draggingCol = ci; e.dataTransfer.effectAllowed = 'move'; });
-      cell.addEventListener('dragover', (e) => { e.preventDefault(); cell.classList.add('drag-over'); });
-      cell.addEventListener('dragleave', () => cell.classList.remove('drag-over'));
-      cell.addEventListener('drop', (e) => { e.preventDefault(); cell.classList.remove('drag-over'); if (draggingCol != null) moveColumn(draggingCol, ci); draggingCol = null; });
-      letterRow.append(cell);
-    });
-    table.append(letterRow);
-
     b.rows.forEach((row, ri) => {
       const tr = el('tr', {});
-      const numCell = el('td', { class: 'desc-table-num', draggable: 'true', title: 'Перетягніть, щоб перемістити рядок' }, String(ri + 1));
-      numCell.addEventListener('dragstart', (e) => { draggingRow = ri; e.dataTransfer.effectAllowed = 'move'; });
-      numCell.addEventListener('dragover', (e) => { e.preventDefault(); numCell.classList.add('drag-over'); });
-      numCell.addEventListener('dragleave', () => numCell.classList.remove('drag-over'));
-      numCell.addEventListener('drop', (e) => { e.preventDefault(); numCell.classList.remove('drag-over'); if (draggingRow != null) moveRow(draggingRow, ri); draggingRow = null; });
-      tr.append(numCell);
       row.forEach((cell, ci) => {
         const input = el('input', { value: cell, oninput: (e) => { row[ci] = e.target.value; scheduleSave(); } });
         const td = el('td', {}, input,
@@ -528,7 +615,39 @@ function renderTable(b, scheduleSave) {
       });
       table.append(tr);
     });
-    wrapTable.append(table);
+    wrapTable.append(table, letterBar, numBar);
+    currentTable = table;
+    positionOverlays(table);
+  }
+  wrapTable.addEventListener('mouseenter', () => { if (currentTable) positionOverlays(currentTable); });
+  // Виміряні пікселі реальних клітинок — overlay-літери/номери мають
+  // ТОЧНО збігатись розміром з колонками/рядками, які вони позначають,
+  // інакше «куди саме перетягую» виглядало б неправдиво.
+  function positionOverlays(table) {
+    letterBar.textContent = '';
+    numBar.textContent = '';
+    const firstRow = table.rows[0];
+    if (!firstRow) return;
+    [...firstRow.children].forEach((td, ci) => {
+      const r = td.getBoundingClientRect();
+      const cell = el('div', {
+        class: 'desc-table-letter', draggable: 'true', title: 'Перетягніть, щоб перемістити колонку',
+        style: `width:${r.width}px`,
+      }, colLetter(ci));
+      cell.addEventListener('dragstart', (e) => { draggingCol = ci; e.dataTransfer.effectAllowed = 'move'; });
+      cell.addEventListener('dragend', () => letterBar.querySelectorAll('.desc-table-col-indicator').forEach((n) => n.remove()));
+      letterBar.append(cell);
+    });
+    [...table.rows].forEach((tr, ri) => {
+      const r = tr.getBoundingClientRect();
+      const cell = el('div', {
+        class: 'desc-table-num', draggable: 'true', title: 'Перетягніть, щоб перемістити рядок',
+        style: `height:${r.height}px`,
+      }, String(ri + 1));
+      cell.addEventListener('dragstart', (e) => { draggingRow = ri; e.dataTransfer.effectAllowed = 'move'; });
+      cell.addEventListener('dragend', () => numBar.querySelectorAll('.desc-table-row-indicator').forEach((n) => n.remove()));
+      numBar.append(cell);
+    });
   }
   renderGrid();
   return wrapTable;
@@ -614,9 +733,16 @@ function renderBlockContent(b, scheduleSave) {
 // (b.children/колонка масиву) відв'язались би від батьківського блоку.
 function renderBlockList(list, scheduleSave) {
   const wrap = el('div', { class: 'desc-blocks' });
+  let draggingIdx = null;
   function insertAfter(index, type) { list.splice(index + 1, 0, makeBlock(type)); renderAll(); scheduleSave(); }
   function removeBlock(index) {
     if (list.length > 1) list.splice(index, 1); else list.splice(0, list.length, makeBlock('paragraph'));
+    renderAll(); scheduleSave();
+  }
+  function moveBlock(from, to) {
+    if (from === to) return;
+    const [item] = list.splice(from, 1);
+    list.splice(to, 0, item);
     renderAll(); scheduleSave();
   }
   function blockTypeMenu(anchor, index) {
@@ -629,13 +755,28 @@ function renderBlockList(list, scheduleSave) {
         el('div', { class: 'task-popover-item', onclick: () => { box2.remove(); insertAfter(index, 'columns'); } }, icon('grid', 13), 'Колонки'));
     });
   }
+  // Три кнопки колонкою (не рядком): зверху — перетягнути (переставити
+  // блок вище/нижче будь-де в цьому списку), тоді додати, знизу — видалити.
   function renderAll() {
     wrap.textContent = '';
     wrap.append(...list.map((b, i) => {
+      const dragBtn = el('button', { class: 'desc-block-drag', type: 'button', title: 'Перетягніть, щоб перемістити' }, icon('grip', 11));
       const plusBtn = el('button', { class: 'desc-block-plus', type: 'button', title: 'Додати блок' }, icon('plus', 12));
       plusBtn.addEventListener('click', (e) => { e.stopPropagation(); blockTypeMenu(plusBtn, i); });
       const delBtn = el('button', { class: 'desc-block-del', type: 'button', title: 'Видалити блок', onclick: () => removeBlock(i) }, icon('trash', 11));
-      return el('div', { class: 'desc-block' }, el('div', { class: 'desc-block-gutter' }, plusBtn, delBtn), renderBlockContent(b, scheduleSave));
+      const row = el('div', { class: 'desc-block' }, el('div', { class: 'desc-block-gutter' }, dragBtn, plusBtn, delBtn), renderBlockContent(b, scheduleSave));
+      dragBtn.draggable = true;
+      dragBtn.addEventListener('dragstart', (e) => { draggingIdx = i; row.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+      dragBtn.addEventListener('dragend', () => row.classList.remove('dragging'));
+      row.addEventListener('dragover', (e) => { if (draggingIdx == null) return; e.preventDefault(); row.classList.add('drag-over'); });
+      row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+      row.addEventListener('drop', (e) => {
+        if (draggingIdx == null) return;
+        e.preventDefault(); row.classList.remove('drag-over');
+        const from = draggingIdx; draggingIdx = null;
+        moveBlock(from, i);
+      });
+      return row;
     }));
   }
   renderAll();
@@ -975,8 +1116,13 @@ export async function renderTaskBoard(boardId) {
   function renderHead() {
     head.textContent = '';
     const boardMenuBtn = el('button', { class: 'task-board-menu-btn', title: 'Меню дошки', onclick: (e) => { e.stopPropagation(); boardMenu(boardMenuBtn); } }, icon('more', 15));
+    // renderHead() (де й малюються ці кнопки) раніше викликався лише при
+    // reload() дошки — перемикання view (Дошка/Список/Календар) міняло
+    // лише renderBody(), тому активна кнопка так і лишалась на «Дошка»
+    // назавжди. Перемальовуємо і шапку теж, щоб .active перескочив на
+    // справді обрану кнопку.
     const viewBtn = (key, label) => el('button', {
-      class: `btn small${view === key ? ' active' : ''}`, onclick: () => { view = key; renderBody(); },
+      class: `btn small${view === key ? ' active' : ''}`, onclick: () => { view = key; renderHead(); renderBody(); },
     }, label);
     head.append(el('div', { class: 'row tight', style: 'align-items:center;gap:8px;flex-wrap:wrap' },
       el('a', { href: `#/space/${space.id}`, style: 'display:inline-flex;align-items:center;gap:4px;font-size:12.5px' },
@@ -1042,6 +1188,52 @@ export async function renderTaskBoard(boardId) {
     chip.addEventListener('click', (e) => { e.stopPropagation(); openTaskCard(card.id, reload); });
     return chip;
   }
+  // Клік по КЛІТИНЦІ дня (не по конкретній задачі — та сама подія
+  // зупиняється в calTaskChip) відкриває панель праворуч: список усіх
+  // задач цього дня і завантаження команди у відсотках (частка задач дня
+  // на кожного виконавця, зі шкалою).
+  function openDayPanel(dateKey, items) {
+    const bg = el('div', { class: 'drawer-bg', onclick: (e) => { if (e.target === bg) bg.remove(); } });
+    const dateObj = new Date(`${dateKey}T00:00:00`);
+    const dateLabel = dateObj.toLocaleDateString('uk-UA', { weekday: 'long', day: 'numeric', month: 'long' });
+    const byMember = new Map();
+    items.forEach(({ card }) => {
+      const key = card.assignee_user_id || 'none';
+      byMember.set(key, (byMember.get(key) || 0) + 1);
+    });
+    const total = items.length || 1;
+    const workloadRows = [...byMember.entries()].sort((a, b) => b[1] - a[1]).map(([uid, count]) => {
+      const m = members.find((mm) => mm.user_id === uid);
+      const pct = Math.round((count / total) * 100);
+      return el('div', { class: 'cal-panel-workload-row' },
+        m ? avatarEl(m.name, m.user_id, 20) : el('span', { class: 'task-avatar task-avatar-empty' }, icon('user', 12)),
+        el('span', { class: 'cal-panel-workload-name' }, m ? m.name : 'Без виконавця'),
+        el('div', { class: 'task-progress-track', style: 'flex:1 1 auto' }, el('div', { class: 'task-progress-fill', style: `width:${pct}%` })),
+        el('span', { class: 'muted', style: 'font-size:11.5px' }, `${pct}% (${count})`));
+    });
+    const panel = el('div', { class: 'cal-day-panel' },
+      el('div', { class: 'cal-day-panel-head' },
+        el('b', { style: 'text-transform:capitalize;flex:1 1 auto' }, dateLabel),
+        el('button', { class: 'btn small icon-only', onclick: () => bg.remove() }, icon('close', 14))),
+      el('div', { class: 'cal-day-panel-body' },
+        el('div', { class: 'task-popover-heading' }, `Задачі (${items.length})`),
+        items.length
+          ? el('div', { style: 'display:flex;flex-direction:column;gap:4px' }, ...items.map(({ card, col }) => {
+            const hex = tagColorHex(col.color);
+            const m = members.find((mm) => mm.user_id === card.assignee_user_id);
+            const row = el('div', { class: 'cal-panel-task-row' },
+              el('span', { class: 'kanban-col-pill', style: `background:${hex}22;color:${hex}` }, col.name),
+              el('span', { style: 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, card.title),
+              m ? avatarEl(m.name, m.user_id, 18) : null);
+            row.addEventListener('click', () => { bg.remove(); openTaskCard(card.id, reload); });
+            return row;
+          }))
+          : el('div', { class: 'muted', style: 'font-size:12.5px' }, 'На цей день задач нема'),
+        el('div', { class: 'task-popover-heading' }, 'Завантаження команди'),
+        workloadRows.length ? el('div', { style: 'display:flex;flex-direction:column;gap:8px' }, ...workloadRows) : el('div', { class: 'muted', style: 'font-size:12.5px' }, '—')));
+    bg.append(panel);
+    document.body.append(bg);
+  }
   function calShiftAnchor(dir) {
     const nd = new Date(calAnchor);
     if (calMode === 'week') nd.setDate(nd.getDate() + dir * 7); else nd.setMonth(nd.getMonth() + dir);
@@ -1074,9 +1266,11 @@ export async function renderTaskBoard(boardId) {
       const d = new Date(start); d.setDate(d.getDate() + i);
       const key = calDayKey(d);
       const items = byDate.get(key) || [];
-      wrap.append(el('div', { class: `cal-day${key === todayKey ? ' today' : ''}` },
+      const dayCell = el('div', { class: `cal-day${key === todayKey ? ' today' : ''}` },
         el('div', { class: 'cal-day-head' }, el('span', {}, WEEKDAYS[i]), el('b', {}, String(d.getDate()))),
-        el('div', { class: 'cal-day-items' }, ...items.map(({ card, col }) => calTaskChip(card, col)))));
+        el('div', { class: 'cal-day-items' }, ...items.map(({ card, col }) => calTaskChip(card, col))));
+      dayCell.addEventListener('click', () => openDayPanel(key, items));
+      wrap.append(dayCell);
     }
     return wrap;
   }
@@ -1094,10 +1288,12 @@ export async function renderTaskBoard(boardId) {
       const inMonth = d.getMonth() === calAnchor.getMonth();
       const shown = items.slice(0, 3);
       const rest = items.length - shown.length;
-      wrap.append(el('div', { class: `cal-mday${inMonth ? '' : ' outside'}${key === todayKey ? ' today' : ''}` },
+      const dayCell = el('div', { class: `cal-mday${inMonth ? '' : ' outside'}${key === todayKey ? ' today' : ''}` },
         el('div', { class: 'cal-mday-num' }, String(d.getDate())),
         el('div', { class: 'cal-mday-items' }, ...shown.map(({ card, col }) => calTaskChip(card, col)),
-          rest > 0 ? el('div', { class: 'cal-mday-more' }, `+${rest} ще`) : null)));
+          rest > 0 ? el('div', { class: 'cal-mday-more' }, `+${rest} ще`) : null));
+      dayCell.addEventListener('click', () => openDayPanel(key, items));
+      wrap.append(dayCell);
     }
     return wrap;
   }
@@ -1219,8 +1415,8 @@ export async function renderTaskBoard(boardId) {
         fieldRowMini('calendar', 'Дати', datesLabel, (e) => {
           e.stopPropagation();
           openPopover(e.currentTarget, (box2) => {
-            const startInput = el('input', { type: 'date', value: draft.start_date || '', onchange: () => { draft.start_date = startInput.value || null; renderRows(); } });
-            const dueInput = el('input', { type: 'date', value: draft.due_date || '', onchange: () => { draft.due_date = dueInput.value || null; renderRows(); } });
+            const startInput = withPicker(el('input', { type: 'date', value: draft.start_date || '', onchange: () => { draft.start_date = startInput.value || null; renderRows(); } }));
+            const dueInput = withPicker(el('input', { type: 'date', value: draft.due_date || '', onchange: () => { draft.due_date = dueInput.value || null; renderRows(); } }));
             box2.append(
               el('div', { class: 'task-popover-item', style: 'cursor:default' }, el('span', { class: 'muted', style: 'width:30px' }, 'З'), startInput),
               el('div', { class: 'task-popover-item', style: 'cursor:default' }, el('span', { class: 'muted', style: 'width:30px' }, 'До'), dueInput));
@@ -1448,6 +1644,8 @@ export async function renderTaskBoard(boardId) {
     }
 
     card.append(miniRow);
+    const progress = progressBarNode(c.total_seconds, c.estimate_minutes, true);
+    if (progress) card.append(progress);
     if (timerNode) card.append(timerNode);
     card.addEventListener('dragstart', () => {
       dragging = { id: c.id }; card.classList.add('dragging'); startAutoScroll();
@@ -1491,6 +1689,17 @@ export async function openTaskCard(cardId, onChange = () => {}) {
     catch (e) { toast(e.message, true); }
   }
 
+  // Пігулка кольору колонки (як і статус у полі картки) — за НАЗВОЮ
+  // колонки з payload-у (колонки самі не зберігають, лише поточний
+  // список), тому якщо колонку відтоді перейменували/видалили — просто
+  // звичайний текст без кольору, без падінь.
+  function statusPill(name, columnsList) {
+    const col = (columnsList || []).find((c) => c.name === name);
+    if (!col) return el('span', {}, name || '—');
+    const hex = tagColorHex(col.color);
+    return el('span', { class: 'task-status-pill-mini', style: `background:${hex}22;color:${hex}` }, name);
+  }
+
   function activityText(a) {
     const p = a.payload ? JSON.parse(a.payload) : {};
     const who = a.user_name || 'Хтось';
@@ -1529,10 +1738,10 @@ export async function openTaskCard(cardId, onChange = () => {}) {
     const endD = entry.ended_at ? new Date(entry.ended_at) : new Date();
 
     openPopover(anchor, (box2) => {
-      const startTimeInput = el('input', { type: 'time', value: timeKey(startD) });
-      const endTimeInput = el('input', { type: 'time', value: timeKey(endD) });
-      const startDateInput = el('input', { type: 'date', value: dayKey(startD) });
-      const endDateInput = el('input', { type: 'date', value: dayKey(endD) });
+      const startTimeInput = withPicker(el('input', { type: 'time', value: timeKey(startD) }));
+      const endTimeInput = withPicker(el('input', { type: 'time', value: timeKey(endD) }));
+      const startDateInput = withPicker(el('input', { type: 'date', value: dayKey(startD) }));
+      const endDateInput = withPicker(el('input', { type: 'date', value: dayKey(endD) }));
       const dayBadge = el('span', { class: 'time-edit-daybadge hidden' });
       const totalLabel = el('b', { class: 'time-edit-total' });
       const datesWrap = el('div', { class: 'time-edit-dates hidden' },
@@ -1624,8 +1833,11 @@ export async function openTaskCard(cardId, onChange = () => {}) {
     // (постійно росте), тому клікабельним воно стає лише коли зупинено.
     const lastEntry = [...timeEntries].filter((t) => t.ended_at).sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)))[0];
     const timeLabelClickable = !isRunning && !!lastEntry;
+    // Без явного зменшеного font-size — усі значення полів картки мають
+    // бути ОДНАКОВОГО розміру (раніше «Трекер часу» виглядав дрібнішим за
+    // сусідні поля саме через цей inline-override).
     const timeLabel = el('span', {
-      class: `muted${timeLabelClickable ? ' activity-clickable' : ''}`, style: 'font-size:12px',
+      class: `muted${timeLabelClickable ? ' activity-clickable' : ''}`,
       title: timeLabelClickable ? 'Редагувати запис часу' : undefined,
       onclick: timeLabelClickable ? () => editTimeEntry(lastEntry.id, timeLabel) : undefined,
     }, formatSeconds(totalSeconds));
@@ -1636,6 +1848,20 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       tickTimer = setInterval(tick, 1000);
     }
     const timerCell = el('div', { style: 'display:flex;align-items:center;gap:8px' }, timerBtn, timeLabel);
+
+    // Estimate (у годинах — зручніше вводити людині, зберігається у
+    // хвилинах) — і сам прогрес-бар «натрекано / оцінка» рахується від
+    // цього поля. Автор — хто створив картку (created_by), лише читання.
+    const estimateInput = el('input', {
+      type: 'number', min: '0', step: '0.25', value: card.estimate_minutes ? String(card.estimate_minutes / 60) : '',
+      placeholder: '—', style: 'width:64px',
+    });
+    estimateInput.addEventListener('change', () => {
+      const v = estimateInput.value.trim();
+      patch({ estimate_minutes: v ? Math.round(Number(v) * 60) : null });
+    });
+    const estimateField = el('div', { style: 'display:flex;align-items:center;gap:6px' }, estimateInput, el('span', { class: 'muted' }, 'год'));
+    const authorField = el('div', { class: 'with-icon' }, avatarEl(card.creator_name || '?', card.created_by, 18), card.creator_name || '—');
 
     // Автозбереження блоків опису НЕ йде через звичайний patch()/refresh() —
     // той перемальовує всю модалку й скинув би фокус посеред набору тексту.
@@ -1670,19 +1896,26 @@ export async function openTaskCard(cardId, onChange = () => {}) {
         }, icon('trash', 13), 'Видалити задачу') : el('div', { class: 'muted', style: 'padding:6px 8px;font-size:12px' }, 'Немає доступних дій'));
       });
     });
-    const main = el('div', { class: 'task-drawer-main' },
+    // Верхня частина (крихти/меню, назва, прогрес, таблиця полів) — завжди
+    // повністю видна, НЕ скролиться; скролиться лише вміст нижче (опис,
+    // файли) — у своєму контейнері з тонким скролом, окремо від полів.
+    const top = el('div', { class: 'task-drawer-top' },
       el('div', { class: 'row tight', style: 'align-items:center;gap:8px' },
         el('div', { class: 'task-drawer-crumb', style: 'flex:1 1 auto' }, [space?.name, board?.name].filter(Boolean).join(' / ')),
         cardMenuBtn),
       titleInput,
+      progressBarNode(totalSeconds, card.estimate_minutes),
       el('div', { class: 'task-field-table' },
         fieldRow(fieldCell('dot', 'Статус', statusField), fieldCell('user', 'Виконавець', assigneeField)),
         fieldRow(fieldCell('calendar', 'Дати', datesCell), fieldCell('flag', 'Пріоритет', priorityField)),
-        fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('tag', 'Теги', tagsField))),
+        fieldRow(fieldCell('gauge', 'Estimate', estimateField), fieldCell('idCard', 'Автор', authorField)),
+        fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('tag', 'Теги', tagsField))));
+    const scroll = el('div', { class: 'task-drawer-scroll' },
       descArea,
       el('div', { class: 'task-attach-list' },
         ...attachments.map((a) => fileChip(a, canDelete ? async () => { await api.del(`/task_attachments/${a.id}`); await refresh(); } : null))),
       el('button', { class: 'task-quick-row', onclick: () => fileInput.click() }, icon('paperclip', 14), 'Прикріпити файл'), fileInput);
+    const main = el('div', { class: 'task-drawer-main' }, top, scroll);
 
     // ── Права частина: Activity + коментарі ────────────────────────────
     const feedItems = [
@@ -1691,7 +1924,10 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       ...activity.filter((a) => a.kind !== 'commented').map((a) => {
         const p = a.payload ? JSON.parse(a.payload) : {};
         const clickable = (a.kind === 'time_started' || a.kind === 'time_stopped') && p.entry_id;
-        const textNode = el('div', clickable ? { class: 'activity-clickable', title: 'Редагувати запис часу', onclick: () => editTimeEntry(p.entry_id, textNode) } : {}, activityText(a));
+        const content = a.kind === 'moved'
+          ? [`${a.user_name || 'Хтось'} переніс(ла): `, statusPill(p.from, columns), ' → ', statusPill(p.to, columns), p.auto ? ' (автоматично)' : '']
+          : [activityText(a)];
+        const textNode = el('div', clickable ? { class: 'activity-clickable', title: 'Редагувати запис часу', onclick: () => editTimeEntry(p.entry_id, textNode) } : {}, ...content);
         return { created_at: a.created_at, node: el('div', { class: 'activity-item' },
           el('div', { class: 'activity-bullet' }),
           el('div', { class: 'activity-body' }, textNode, el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(a.created_at)))) };
@@ -1746,6 +1982,10 @@ export async function openTaskCard(cardId, onChange = () => {}) {
         await refresh();
       } catch (e) { toast(e.message, true); }
     };
+    // Enter — надіслати коментар; Shift+Enter — звичайний перенос рядка.
+    commentInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendComment(); }
+    });
 
     const side = el('div', { class: 'task-drawer-side' },
       el('div', { class: 'task-drawer-side-head' }, 'Activity'),

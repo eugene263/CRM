@@ -538,7 +538,12 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 .map-side-panel-tabs { display: flex; gap: 6px; margin-top: 4px; }
 .map-side-panel-body { flex: 1 1 auto; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; }
 .map-color-swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
-.map-color-swatch.active { border-color: var(--text); }
+/* .active НЕ можна позначати через border-color: усі виклики задають
+   border-color:${hex} inline-стилем (свій колір рамки на кожен свотч), а
+   inline-стиль завжди переможе будь-яке класове правило на ту саму
+   властивість незалежно від специфічності — рамка «обраності» просто
+   ніколи не була б видна. outline — інша властивість, конфлікту нема. */
+.map-color-swatch.active { outline: 2px solid var(--text); outline-offset: 2px; }
 
 /* ── Задачі: картка задачі — великий попап, зліва поля, справа Activity +
    коментарі, як у референсі ClickUp: рядки полів «іконка+назва | значення»
@@ -550,7 +555,22 @@ td.editable textarea { min-width: 220px; resize: vertical; }
   box-shadow: 0 24px 60px rgba(0, 0, 0, .28);
   display: flex; overflow: hidden;
 }
-.task-drawer-main { flex: 1 1 auto; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* Поля картки (статус/дати/estimate/трекер...) завжди повністю видні
+   зверху — не скролляться; скролиться лише .task-drawer-scroll (опис,
+   файли) у своєму контейнері з тонким скролом. min-height:0 на обох
+   флекс-предках — інакше flex-item за замовчуванням не стискається
+   нижче contentsize, і внутрішній overflow:auto просто ніколи б не
+   спрацював. */
+.task-drawer-main { flex: 1 1 auto; overflow: hidden; padding: 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 0; }
+.task-drawer-top { flex: 0 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.task-drawer-scroll {
+  flex: 1 1 auto; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 14px;
+  padding-right: 4px; margin-right: -4px; scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+}
+.task-drawer-scroll::-webkit-scrollbar { width: 7px; }
+.task-drawer-scroll::-webkit-scrollbar-track { background: transparent; }
+.task-drawer-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+.task-drawer-scroll::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 .task-drawer-side { width: 360px; flex: 0 0 auto; border-left: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; min-height: 0; }
 .task-drawer-crumb { font-size: 12.5px; color: var(--muted); }
 .task-drawer-side-head { font-weight: 600; margin-bottom: 8px; }
@@ -561,12 +581,22 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 }
 .task-title:hover, .task-title:focus { background: var(--panel-2); outline: none; }
 
+/* Прогрес-бар «натрекано / estimate» — над таблицею полів у картці, і
+   компактніший (менша висота, менший відступ) на плашці картки в канбані. */
+.task-progress { display: flex; align-items: center; gap: 8px; }
+.task-progress-track { flex: 1 1 auto; height: 6px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+.task-progress-fill { height: 100%; border-radius: 4px; background: var(--accent-2); transition: width .2s; }
+.task-progress.over .task-progress-fill { background: var(--danger); }
+.task-progress-pct { flex: 0 0 auto; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.task-progress.compact { margin-top: 6px; }
+.task-progress.compact .task-progress-track { height: 4px; }
+
 .task-field-table { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .task-field-row { display: flex; border-top: 1px solid var(--line); }
 .task-field-row:first-child { border-top: none; }
 .task-field-cell { flex: 1 1 50%; display: flex; align-items: center; gap: 10px; padding: 9px 12px; min-width: 0; }
 .task-field-cell + .task-field-cell { border-left: 1px solid var(--line); }
-.task-field-label { flex: 0 0 110px; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+.task-field-label { flex: 0 0 128px; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
 .task-field-value { flex: 1 1 auto; min-width: 0; }
 .task-field-value select, .task-field-value input {
   border: none; background: transparent; padding: 3px 4px; border-radius: 6px; width: 100%;
@@ -581,6 +611,9 @@ td.editable textarea { min-width: 220px; resize: vertical; }
   font-weight: 600; font-size: 12px; border-radius: 999px; padding: 4px 10px; cursor: pointer;
 }
 .task-timer-cell { width: 100%; }
+/* Той самий колір статусу, тільки в рядку Activity («переніс(ла): X → Y») —
+   не просто текст назв колонок, а такі самі кольорові пігулки. */
+.task-status-pill-mini { display: inline-flex; align-items: center; font-weight: 700; font-size: 11.5px; border-radius: 999px; padding: 1px 8px; }
 
 .task-desc {
   min-height: 70px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
@@ -673,14 +706,19 @@ td.editable textarea { min-width: 220px; resize: vertical; }
    показує зліва «+» (додати блок нижче) і кошик (видалити цей блок) —
    як «+» зліва рядка в Notion. ─────────────────────────────────────── */
 .desc-blocks { display: flex; flex-direction: column; gap: 2px; }
-.desc-block { display: flex; align-items: flex-start; gap: 4px; }
-.desc-block-gutter { display: flex; gap: 2px; flex: 0 0 auto; padding-top: 6px; opacity: 0; transition: opacity .12s; }
+.desc-block { display: flex; align-items: flex-start; gap: 4px; border-radius: 6px; transition: opacity .12s, outline-color .12s; outline: 2px solid transparent; outline-offset: -2px; }
+.desc-block.dragging { opacity: .4; }
+.desc-block.drag-over { outline-color: var(--accent); }
+/* Три кнопки КОЛОНКОЮ (не рядком): перетягнути (зверху) → додати → видалити
+   (знизу) — весь функціонал переставлення блоку тепер тут же зліва. */
+.desc-block-gutter { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; padding-top: 6px; opacity: 0; transition: opacity .12s; }
 .desc-block:hover .desc-block-gutter { opacity: 1; }
-.desc-block-plus, .desc-block-del {
+.desc-block-drag, .desc-block-plus, .desc-block-del {
   width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--muted); border-radius: 5px; cursor: pointer; padding: 0;
 }
-.desc-block-plus:hover, .desc-block-del:hover { background: var(--panel-2); color: var(--text); }
+.desc-block-drag { cursor: grab; }
+.desc-block-drag:hover, .desc-block-plus:hover, .desc-block-del:hover { background: var(--panel-2); color: var(--text); }
 .desc-block-text {
   flex: 1 1 auto; min-width: 0; border: none; background: transparent; resize: none;
   font: inherit; padding: 5px 6px; border-radius: 6px; line-height: 1.5; overflow: hidden;
@@ -743,7 +781,7 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
    рядок вище» (зелений, підсвічує весь рядок); той самий кут в інших
    колонках = «видалити колонку» (червоний, підсвічує колонку). Низ-ліво
    першої колонки = «видалити рядок» (червоний, підсвічує рядок). */
-.desc-table-wrap { flex: 1 1 auto; min-width: 0; padding: 4px 0 10px; }
+.desc-table-wrap { flex: 1 1 auto; min-width: 0; padding: 4px 0 10px; position: relative; }
 .desc-table { border-collapse: collapse; width: auto; }
 .desc-table td { border: 1px solid var(--line); padding: 0; white-space: normal; position: relative; }
 .desc-table td input { width: 100%; min-width: 90px; border: none; background: transparent; padding: 6px 8px; font: inherit; }
@@ -767,22 +805,31 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
 .desc-table td.col-add-hl, .desc-table td.row-add-hl { background: color-mix(in srgb, var(--accent-2, #12b886) 16%, transparent); }
 .desc-table td.col-del-hl, .desc-table td.row-del-hl { background: color-mix(in srgb, var(--danger) 16%, transparent); }
 
-/* Буквено-цифрова нумерація таблиці (як в Excel) — з'являється тільки при
-   наведенні на будь-яке місце таблиці (порожнє місце завжди зарезервоване
-   під неї, щоб нічого не стрибало); перетягування за літеру/номер
-   переставляє колонку/рядок у довільне місце. */
-.desc-table-corner, .desc-table-letter, .desc-table-num {
-  border: 1px solid var(--line); background: var(--panel-2); text-align: center;
-  font-size: 10px; color: var(--muted); user-select: none; padding: 0 !important;
+/* Буквено-цифрова нумерація таблиці (як в Excel) — ОVERLAY: position:
+   absolute поверх таблиці, БЕЗ жодного зарезервованого місця в звичайному
+   потоці документа (за замовчуванням цих рядків/колонок просто нема в
+   layout). Показується тільки при наведенні на будь-яке місце таблиці,
+   зʼявляючись ПОВЕРХ сусіднього вмісту (не розсовуючи його). Ширина/висота
+   кожної літери/номера виставляється inline-стилем у JS — точно під
+   виміряний розмір відповідної колонки/рядка таблиці. */
+.desc-table-letterbar, .desc-table-numbar {
+  position: absolute; display: flex; opacity: 0; pointer-events: none;
+  transition: opacity .12s; z-index: 5;
 }
-.desc-table-corner { height: 18px; width: 20px; opacity: 0; transition: opacity .12s; }
-.desc-table-letter { height: 18px; cursor: grab; opacity: 0; transition: opacity .12s, background .1s; }
-.desc-table-num { width: 20px; cursor: grab; opacity: 0; transition: opacity .12s, background .1s; }
-.desc-table-wrap:hover .desc-table-corner,
-.desc-table-wrap:hover .desc-table-letter,
-.desc-table-wrap:hover .desc-table-num { opacity: 1; }
-.desc-table-letter.drag-over, .desc-table-num.drag-over { background: color-mix(in srgb, var(--accent) 40%, var(--panel-2)); color: var(--text); }
+.desc-table-letterbar { top: -20px; left: 0; height: 18px; }
+.desc-table-numbar { top: 0; left: -20px; flex-direction: column; width: 18px; }
+.desc-table-wrap:hover .desc-table-letterbar,
+.desc-table-wrap:hover .desc-table-numbar { opacity: 1; pointer-events: auto; }
+.desc-table-letter, .desc-table-num {
+  border: 1px solid var(--line); background: var(--panel-2); box-shadow: var(--shadow);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; color: var(--muted); user-select: none; cursor: grab; flex: 0 0 auto;
+}
 .desc-table-letter:active, .desc-table-num:active { cursor: grabbing; }
+/* Лінія-індикатор між колонками/рядками — куди саме впаде перетягнута
+   колонка чи рядок (той самий прийом, що й drop-індикатор картки в канбані). */
+.desc-table-col-indicator { width: 2px; align-self: stretch; border-radius: 2px; background: var(--accent); }
+.desc-table-row-indicator { height: 2px; align-self: stretch; border-radius: 2px; background: var(--accent); }
 
 /* Спадний список — стрілочка щільно біля заголовка, без плашки-кнопки під нею. */
 .desc-toggle-head { display: flex; align-items: center; gap: 2px; }
@@ -810,7 +857,8 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
 .kanban.kanban-calendar-mode { display: block; overflow-x: visible; padding-bottom: 0; }
 .cal-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
 .cal-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; align-items: start; }
-.cal-day { border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-height: 180px; background: var(--panel-2); }
+.cal-day { border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-height: 180px; background: var(--panel-2); cursor: pointer; }
+.cal-day:hover { border-color: var(--accent); }
 .cal-day.today { border-color: var(--accent); }
 .cal-day-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
 .cal-day-head b { font-size: 15px; color: var(--text); }
@@ -823,8 +871,23 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
 .cal-task-chip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-month { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
 .cal-month-wd { text-align: center; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; padding-bottom: 2px; }
-.cal-mday { border: 1px solid var(--line); border-radius: 8px; padding: 6px; min-height: 92px; background: var(--panel-2); }
+.cal-mday { border: 1px solid var(--line); border-radius: 8px; padding: 6px; min-height: 92px; background: var(--panel-2); cursor: pointer; }
+.cal-mday:hover { border-color: var(--accent); }
 .cal-mday.outside { opacity: .4; }
 .cal-mday.today { border-color: var(--accent); }
 .cal-mday-num { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.cal-mday-more { font-size: 10.5px; color: var(--muted); cursor: default; }
+.cal-mday-more { font-size: 10.5px; color: var(--muted); }
+
+/* Панель дня (клік по клітинці, не по конкретній задачі) — половина екрана
+   справа: повний список задач цього дня + завантаження команди у %. */
+.cal-day-panel {
+  position: fixed; top: 0; right: 0; height: 100%; width: min(420px, 92vw);
+  background: var(--panel); border-left: 1px solid var(--line); box-shadow: -12px 0 40px rgba(0, 0, 0, .28);
+  display: flex; flex-direction: column; z-index: 26;
+}
+.cal-day-panel-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.cal-day-panel-body { flex: 1 1 auto; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.cal-panel-task-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 12.5px; }
+.cal-panel-task-row:hover { background: var(--panel-2); }
+.cal-panel-workload-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.cal-panel-workload-name { flex: 0 0 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

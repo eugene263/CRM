@@ -1953,6 +1953,29 @@ test('редагування картки логує кожну змінену �
   assert.equal(gotAgain.data.activity.length, got.data.activity.length, 'без реальної зміни новий запис не додається');
 });
 
+test('estimate_minutes редагується, логується й видно і в картці, і на дошці', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+
+  const upd = await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { estimate_minutes: 120 } });
+  assert.equal(upd.status, 200, JSON.stringify(upd.data));
+
+  const got = await call(`/api/task_cards/${card.id}`);
+  assert.equal(got.data.card.estimate_minutes, 120);
+  assert.ok(got.data.activity.some((a) => a.kind === 'field_changed' && JSON.parse(a.payload).field === 'оцінку часу'));
+
+  const board = await call(`/api/task_boards/${boardId}`);
+  const boardCard = board.data.columns.find((c) => c.id === colId).cards.find((c) => c.id === card.id);
+  assert.equal(boardCard.estimate_minutes, 120, 'estimate_minutes має бути й у списку карток дошки (для прогрес-бару)');
+
+  // Скидання назад у null теж працює й логується.
+  await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { estimate_minutes: null } });
+  const cleared = await call(`/api/task_cards/${card.id}`);
+  assert.equal(cleared.data.card.estimate_minutes, null);
+});
+
 test('призначення виконавця обмежене учасниками простору й логується окремо', async () => {
   const spaceId = await makeSpace();
   const boardId = await makeBoard(spaceId);

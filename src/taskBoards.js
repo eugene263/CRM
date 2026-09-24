@@ -165,7 +165,7 @@ export async function getBoard(user, boardId) {
   const columns = await all('SELECT * FROM task_columns WHERE board_id=? ORDER BY board_order, id', boardId);
   const cards = await all(
     `SELECT c.id, c.column_id, c.title, c.priority, c.due_date, c.start_date, c.assignee_user_id, c.board_order,
-            u.name AS assignee_name
+            c.estimate_minutes, u.name AS assignee_name
      FROM task_cards c LEFT JOIN users u ON u.id=c.assignee_user_id
      WHERE c.board_id=? ORDER BY c.board_order`, boardId,
   );
@@ -391,8 +391,8 @@ export async function getCard(user, cardId) {
   };
 }
 
-const CARD_FIELDS = ['title', 'description', 'start_date', 'due_date', 'priority', 'assignee_user_id'];
-const FIELD_LABELS = { title: 'назву', description: 'опис', start_date: 'дату початку', due_date: 'дедлайн', priority: 'пріоритет' };
+const CARD_FIELDS = ['title', 'description', 'start_date', 'due_date', 'priority', 'assignee_user_id', 'estimate_minutes'];
+const FIELD_LABELS = { title: 'назву', description: 'опис', start_date: 'дату початку', due_date: 'дедлайн', priority: 'пріоритет', estimate_minutes: 'оцінку часу' };
 
 // Якщо задачі щойно поставили дату початку, а вона й досі лежить у
 // колонці ДО «До виконання»/«В роботі»/«Готово» (тобто в якомусь
@@ -425,6 +425,7 @@ export async function updateCard(user, cardId, patch) {
     if (!(f in patch)) continue;
     let v = patch[f];
     if (f === 'assignee_user_id') v = v ? Number(v) : null;
+    if (f === 'estimate_minutes') v = v ? Number(v) : null;
     if (f === 'title') v = requireName(v, 'назву картки');
     if (v === current[f] || (v ?? null) === (current[f] ?? null)) continue;
     data[f] = v;

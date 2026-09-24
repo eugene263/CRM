@@ -214,6 +214,15 @@ const migrations = [
       if (!cols.has('pinned')) await run('ALTER TABLE task_comments ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
     },
   },
+  {
+    // Estimate (оцінка часу в хвилинах) — прогрес-бар «скільки вже
+    // натрекано з того, що планували» рахується від цього поля.
+    id: '2026-09-27-task-cards-estimate',
+    async up() {
+      const cols = await columnsOf('task_cards');
+      if (!cols.has('estimate_minutes')) await run('ALTER TABLE task_cards ADD COLUMN estimate_minutes INTEGER');
+    },
+  },
 ];
 
 export async function migrate() {

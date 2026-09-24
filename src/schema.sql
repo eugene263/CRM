@@ -1080,6 +1080,7 @@ CREATE TABLE IF NOT EXISTS task_cards (
   assignee_user_id INTEGER REFERENCES users(id),
   tags TEXT, -- застаріле: вільний текст тегів замінили на task_tags/task_card_tags нижче
   board_order REAL NOT NULL DEFAULT 0,
+  estimate_minutes INTEGER, -- оцінка часу; прогрес-бар = натрекано / це
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT
