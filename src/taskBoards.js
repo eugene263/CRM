@@ -304,6 +304,30 @@ export async function updateCard(user, cardId, patch) {
   return { ok: true };
 }
 
+// Перетягнули картку саме в колонку «В роботі» — трекер часу того, хто
+// тягнув, стартує сам; перетягнули в будь-яку іншу — власний запущений
+// таймер сам зупиняється. Звірка по НАЗВІ колонки (без урахування
+// регістру/пробілів): у task_columns нема окремого поля-«коду», колонки
+// довільні й перейменовувані, тому це єдиний спосіб впізнати «робочу»
+// колонку — перейменують її, і авто-трекінг для цієї дошки просто мовчки
+// перестане спрацьовувати, без падінь.
+const AUTO_TRACK_COLUMN_NAME = 'в роботі';
+
+async function autoTrackOnMove(cardId, userId, columnName) {
+  const isTracked = String(columnName || '').trim().toLowerCase() === AUTO_TRACK_COLUMN_NAME;
+  const running = await get('SELECT * FROM task_time_entries WHERE card_id=? AND user_id=? AND ended_at IS NULL', cardId, userId);
+  if (isTracked) {
+    if (running) return; // вже й так іде — не плодимо другий запис
+    await insert('task_time_entries', { card_id: cardId, user_id: userId, started_at: new Date().toISOString() });
+    await logActivity(cardId, userId, 'time_started', { auto: true });
+  } else if (running) {
+    const endedAt = new Date();
+    const seconds = Math.max(0, Math.round((endedAt.getTime() - new Date(running.started_at).getTime()) / 1000));
+    await run('UPDATE task_time_entries SET ended_at=?, seconds=? WHERE id=?', endedAt.toISOString(), seconds, running.id);
+    await logActivity(cardId, userId, 'time_stopped', { seconds, auto: true });
+  }
+}
+
 export async function moveCard(user, cardId, columnId, boardOrder) {
   const { board_id: boardId, column_id: fromColumnId } = await cardRow(cardId);
   const spaceId = await spaceIdOfBoard(boardId);
@@ -315,6 +339,7 @@ export async function moveCard(user, cardId, columnId, boardOrder) {
   if (columnId !== fromColumnId) {
     const fromCol = await get('SELECT name FROM task_columns WHERE id=?', fromColumnId);
     await logActivity(cardId, user.id, 'moved', { from: fromCol?.name || '—', to: col.name });
+    await autoTrackOnMove(cardId, user.id, col.name);
   }
   return { ok: true };
 }

@@ -1912,7 +1912,9 @@ test('картка переноситься між колонками — акт
   const spaceId = await makeSpace();
   const boardId = await makeBoard(spaceId);
   const board = await call(`/api/task_boards/${boardId}`);
-  const [colA, colB] = board.data.columns;
+  // Навмисно НЕ «В роботі» (columns[1]) — та колонка сама смикає трекер
+  // часу (окремі тести нижче), тут перевіряємо лише сам факт переміщення.
+  const [colA, , colB] = board.data.columns;
   const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colA.id, title: 'Задача' } })).data;
 
   const moved = await call(`/api/task_cards/${card.id}/move`, { method: 'POST', body: { column_id: colB.id, board_order: 500 } });
@@ -2044,4 +2046,58 @@ test('видалення картки прибирає її з дошки; на 
   assert.equal((await call(`/api/task_cards/${card.id}`)).status, 404);
   const board = await call(`/api/task_boards/${boardId}`);
   assert.ok(!board.data.columns.some((c) => c.cards.some((x) => x.id === card.id)));
+});
+
+test('перетягнути картку в «В роботі» — таймер стартує сам; в іншу колонку — сам зупиняється', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const cols = (await call(`/api/task_boards/${boardId}`)).data.columns;
+  const [todo, inProgress, done] = cols; // дефолт: До виконання / В роботі / Готово
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: todo.id, title: 'Задача' } })).data;
+
+  const intoProgress = await call(`/api/task_cards/${card.id}/move`, { method: 'POST', body: { column_id: inProgress.id } });
+  assert.equal(intoProgress.status, 200, JSON.stringify(intoProgress.data));
+
+  const running = await call(`/api/task_cards/${card.id}`);
+  assert.ok(running.data.runningTimer, 'перенесення в «В роботі» само запустило таймер');
+  const startedAuto = running.data.activity.find((a) => a.kind === 'time_started');
+  assert.ok(JSON.parse(startedAuto.payload).auto, 'запуск позначено як автоматичний');
+
+  const outOfProgress = await call(`/api/task_cards/${card.id}/move`, { method: 'POST', body: { column_id: done.id } });
+  assert.equal(outOfProgress.status, 200);
+
+  const stopped = await call(`/api/task_cards/${card.id}`);
+  assert.equal(stopped.data.runningTimer, null, 'перенесення з «В роботі» само зупинило таймер');
+  assert.equal(stopped.data.timeEntries.length, 1);
+  assert.ok(stopped.data.timeEntries[0].seconds >= 0);
+  const stoppedAuto = stopped.data.activity.find((a) => a.kind === 'time_stopped');
+  assert.ok(JSON.parse(stoppedAuto.payload).auto, 'зупинку позначено як автоматичну');
+});
+
+test('переміщення між двома звичайними колонками не чіпає таймер', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const [todo, , done] = (await call(`/api/task_boards/${boardId}`)).data.columns;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: todo.id, title: 'Задача' } })).data;
+
+  await call(`/api/task_cards/${card.id}/move`, { method: 'POST', body: { column_id: done.id } });
+  const got = await call(`/api/task_cards/${card.id}`);
+  assert.equal(got.data.runningTimer, null);
+  assert.equal(got.data.timeEntries.length, 0);
+  assert.ok(!got.data.activity.some((a) => a.kind === 'time_started'));
+});
+
+test('якщо таймер уже запущено вручну, повторне перенесення в «В роботі» не плодить другий запис', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const [todo, inProgress] = (await call(`/api/task_boards/${boardId}`)).data.columns;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: todo.id, title: 'Задача' } })).data;
+
+  await call(`/api/task_cards/${card.id}/timer/start`, { method: 'POST' });
+  await call(`/api/task_cards/${card.id}/move`, { method: 'POST', body: { column_id: inProgress.id } });
+  const got = await call(`/api/task_cards/${card.id}`);
+  assert.ok(got.data.runningTimer);
+  assert.equal(got.data.timeEntries.length, 1, 'другий запис не завівся — трекер і так уже йшов');
+  const startedEvents = got.data.activity.filter((a) => a.kind === 'time_started');
+  assert.equal(startedEvents.length, 1, 'друге «запущено» в активність не додалось');
 });

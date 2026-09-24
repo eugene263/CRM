@@ -385,8 +385,8 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       case 'moved': return `${who} переніс(ла): ${p.from} → ${p.to}`;
       case 'assigned': return `${who} призначив(ла): ${p.to}`;
       case 'field_changed': return `${who} змінив(ла) ${p.field}: «${p.from ?? '—'}» → «${p.to ?? '—'}»`;
-      case 'time_started': return `${who} запустив(ла) таймер`;
-      case 'time_stopped': return `${who} зупинив(ла) таймер: +${formatSeconds(p.seconds)}`;
+      case 'time_started': return `${who} запустив(ла) таймер${p.auto ? ' (автоматично, перенесено в «В роботі»)' : ''}`;
+      case 'time_stopped': return `${who} зупинив(ла) таймер: +${formatSeconds(p.seconds)}${p.auto ? ' (автоматично, перенесено з «В роботі»)' : ''}`;
       case 'time_edited': return `${who} відредагував(ла) час: ${formatSeconds(p.seconds)}`;
       case 'attachment_added': return `${who} додав(ла) файл: ${p.file_name}`;
       default: return `${who}: ${a.kind}`;
