@@ -1013,12 +1013,16 @@ export async function handleApi(req, res, url) {
     }
     if (seg[2] === 'columns' && req.method === 'POST') {
       if (!can(user, 'task_spaces', 'create')) return fail(res, 403, 'Немає прав створювати колонки');
-      return ok(res, await taskBoards.createColumn(user, boardId, (await readBody(req)).name));
+      const body = await readBody(req);
+      return ok(res, await taskBoards.createColumn(user, boardId, body.name, body.color));
     }
     if (seg[2] === 'cards' && req.method === 'POST') {
       if (!can(user, 'task_spaces', 'create')) return fail(res, 403, 'Немає прав створювати картки');
       const body = await readBody(req);
-      return ok(res, await taskBoards.createCard(user, boardId, body.column_id, body.title));
+      return ok(res, await taskBoards.createCard(user, boardId, body.column_id, body.title, {
+        assignee_user_id: body.assignee_user_id, due_date: body.due_date, start_date: body.start_date,
+        priority: body.priority, tag_ids: body.tag_ids,
+      }));
     }
     if (seg[2] === 'tags' && req.method === 'GET') return ok(res, { rows: await taskBoards.listTags(user, boardId) });
     if (seg[2] === 'tags' && req.method === 'POST') {
@@ -1044,10 +1048,7 @@ export async function handleApi(req, res, url) {
     const columnId = Number(seg[1]);
     if (req.method === 'PUT') {
       if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати колонку');
-      const body = await readBody(req);
-      if ('name' in body) await taskBoards.renameColumn(user, columnId, body.name);
-      if ('sort_order' in body) await taskBoards.reorderColumn(user, columnId, body.sort_order);
-      return ok(res, { ok: true });
+      return ok(res, await taskBoards.updateColumn(user, columnId, await readBody(req)));
     }
     if (req.method === 'DELETE') {
       if (!can(user, 'task_spaces', 'delete')) return fail(res, 403, 'Немає прав видаляти колонки');

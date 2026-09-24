@@ -2226,3 +2226,90 @@ test('кінець раніше початку в редагуванні зап�
   });
   assert.equal(res.status, 400);
 });
+
+test('колонка створюється з кольором, редагується (назва/колір/згорнутість/позиція)', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+
+  const created = await call(`/api/task_boards/${boardId}/columns`, { method: 'POST', body: { name: 'Огляд', color: 'purple' } });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  const colId = created.data.id;
+
+  let board = (await call(`/api/task_boards/${boardId}`)).data;
+  let col = board.columns.find((c) => c.id === colId);
+  assert.equal(col.color, 'purple');
+  assert.equal(col.collapsed, 0);
+
+  const badColor = await call(`/api/task_boards/${boardId}/columns`, { method: 'POST', body: { name: 'Х', color: 'not-a-color' } });
+  const badColorCol = (await call(`/api/task_boards/${boardId}`)).data.columns.find((c) => c.id === badColor.data.id);
+  assert.equal(badColorCol.color, 'accent', 'невідомий колір мовчки падає на дефолтний');
+
+  const upd = await call(`/api/task_columns/${colId}`, { method: 'PUT', body: { name: 'Огляд PR', color: 'green', collapsed: true } });
+  assert.equal(upd.status, 200, JSON.stringify(upd.data));
+  board = (await call(`/api/task_boards/${boardId}`)).data;
+  col = board.columns.find((c) => c.id === colId);
+  assert.equal(col.name, 'Огляд PR');
+  assert.equal(col.color, 'green');
+  assert.equal(col.collapsed, 1);
+
+  // Перетягування колонки — та сама дробова позиція (board_order), що й у
+  // карток: переставляємо нову колонку між двома дефолтними.
+  const [first, second] = board.columns;
+  await call(`/api/task_columns/${colId}`, { method: 'PUT', body: { board_order: (first.board_order + second.board_order) / 2 } });
+  board = (await call(`/api/task_boards/${boardId}`)).data;
+  assert.equal(board.columns[1].id, colId);
+});
+
+test('швидке створення картки одразу з виконавцем/датою/пріоритетом/тегами', async () => {
+  const ownerId = (await call('/api/auth/me')).data.user.id;
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const tag = await call(`/api/task_boards/${boardId}/tags`, { method: 'POST', body: { name: 'Швидкий', color: 'pink' } });
+
+  const created = await call(`/api/task_boards/${boardId}/cards`, {
+    method: 'POST',
+    body: {
+      column_id: colId, title: 'Швидка задача', assignee_user_id: ownerId, due_date: '2026-11-01',
+      priority: 'urgent', tag_ids: [tag.data.id],
+    },
+  });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+
+  const got = (await call(`/api/task_cards/${created.data.id}`)).data;
+  assert.equal(got.card.assignee_user_id, ownerId);
+  assert.equal(got.card.due_date, '2026-11-01');
+  assert.equal(got.card.priority, 'urgent');
+  assert.deepEqual(got.tags.map((t) => t.id), [tag.data.id]);
+  // Швидке створення не засмічує Activity полем-за-полем (жодного окремого
+  // field_changed на assignee/due_date/priority) — лише факт створення й
+  // те, що теги виставились (той самий запис, що й на призначенні тегів
+  // з повної картки).
+  assert.deepEqual(got.activity.map((a) => a.kind), ['created', 'tags_changed']);
+});
+
+test('блоки опису (Notion-подібний редактор) зберігаються як є й логуються одним записом', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+
+  const blocks = [
+    { id: 'b1', type: 'paragraph', text: 'Опис задачі' },
+    { id: 'b2', type: 'checklist', items: [{ id: 'i1', text: 'Крок 1', checked: false }] },
+    { id: 'b3', type: 'table', rows: [['A', 'B'], ['1', '2']] },
+    { id: 'b4', type: 'toggle', title: 'Деталі', text: 'Прихований текст', open: false },
+  ];
+  const upd = await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { description_blocks: blocks } });
+  assert.equal(upd.status, 200, JSON.stringify(upd.data));
+
+  const got = (await call(`/api/task_cards/${card.id}`)).data;
+  assert.deepEqual(got.card.description_blocks, blocks);
+  const changed = got.activity.filter((a) => a.kind === 'description_changed');
+  assert.equal(changed.length, 1);
+
+  // Той самий вміст ще раз — жодного нового запису в Activity.
+  await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { description_blocks: blocks } });
+  const again = (await call(`/api/task_cards/${card.id}`)).data;
+  assert.equal(again.activity.filter((a) => a.kind === 'description_changed').length, 1);
+});

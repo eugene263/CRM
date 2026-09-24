@@ -128,8 +128,12 @@ export async function createBoard(user, spaceId, name) {
   const id = await insert('task_boards', { space_id: spaceId, name: clean, sort_order: (maxOrder?.m ?? -1) + 1, created_by: user.id });
   // Дефолтні колонки, щоб дошка не була порожньою відразу — назви можна
   // одразу перейменувати чи видалити, це просто стартова точка.
-  const defaults = ['До виконання', 'В роботі', 'Готово'];
-  for (let i = 0; i < defaults.length; i += 1) await insert('task_columns', { board_id: id, name: defaults[i], sort_order: i });
+  const defaults = [
+    { name: 'До виконання', color: 'accent' }, { name: 'В роботі', color: 'yellow' }, { name: 'Готово', color: 'green' },
+  ];
+  for (let i = 0; i < defaults.length; i += 1) {
+    await insert('task_columns', { board_id: id, name: defaults[i].name, color: defaults[i].color, sort_order: i, board_order: i * 1000 });
+  }
   return { id };
 }
 
@@ -158,7 +162,7 @@ export async function getBoard(user, boardId) {
     'SELECT m.user_id, u.name FROM task_space_members m JOIN users u ON u.id=m.user_id WHERE m.space_id=? ORDER BY u.name',
     spaceId,
   );
-  const columns = await all('SELECT * FROM task_columns WHERE board_id=? ORDER BY sort_order, id', boardId);
+  const columns = await all('SELECT * FROM task_columns WHERE board_id=? ORDER BY board_order, id', boardId);
   const cards = await all(
     `SELECT c.id, c.column_id, c.title, c.priority, c.due_date, c.start_date, c.assignee_user_id, c.board_order,
             u.name AS assignee_name
@@ -167,20 +171,43 @@ export async function getBoard(user, boardId) {
   );
   const cardIds = cards.map((c) => c.id);
   const tagsByCard = new Map();
+  const runningByCard = new Map();
+  const totalByCard = new Map();
   if (cardIds.length) {
+    const placeholders = cardIds.map(() => '?').join(',');
     const tagRows = await all(
       `SELECT ct.card_id, t.id, t.name, t.color FROM task_card_tags ct
-       JOIN task_tags t ON t.id=ct.tag_id WHERE ct.card_id IN (${cardIds.map(() => '?').join(',')})`,
+       JOIN task_tags t ON t.id=ct.tag_id WHERE ct.card_id IN (${placeholders})`,
       ...cardIds,
     );
     for (const r of tagRows) {
       if (!tagsByCard.has(r.card_id)) tagsByCard.set(r.card_id, []);
       tagsByCard.get(r.card_id).push({ id: r.id, name: r.name, color: r.color });
     }
+    // Активний таймер і накопичений час — прямо на плашці картки в
+    // канбані, щоб «скільки вже минуло» було видно, не заходячи в картку.
+    const runningRows = await all(
+      `SELECT card_id, MIN(started_at) AS started_at FROM task_time_entries
+       WHERE ended_at IS NULL AND card_id IN (${placeholders}) GROUP BY card_id`,
+      ...cardIds,
+    );
+    for (const r of runningRows) runningByCard.set(r.card_id, r.started_at);
+    const totalRows = await all(
+      `SELECT card_id, SUM(seconds) AS total FROM task_time_entries WHERE card_id IN (${placeholders}) GROUP BY card_id`,
+      ...cardIds,
+    );
+    for (const r of totalRows) totalByCard.set(r.card_id, Number(r.total) || 0);
   }
   const byColumn = new Map(columns.map((c) => [c.id, { ...c, cards: [] }]));
-  for (const card of cards) byColumn.get(card.column_id)?.cards.push({ ...card, tags: tagsByCard.get(card.id) || [] });
-  return { space, board, members, columns: [...byColumn.values()] };
+  for (const card of cards) {
+    byColumn.get(card.column_id)?.cards.push({
+      ...card, tags: tagsByCard.get(card.id) || [],
+      timer_running_since: runningByCard.get(card.id) || null,
+      total_seconds: totalByCard.get(card.id) || 0,
+    });
+  }
+  const boardTags = await all('SELECT id, name, color FROM task_tags WHERE board_id=? ORDER BY name', boardId);
+  return { space, board, members, boardTags, columns: [...byColumn.values()] };
 }
 
 // ── Теги (керовані записи на дошку: назва + колір) ─────────────────────
@@ -239,28 +266,33 @@ export async function setCardTags(user, cardId, tagIds) {
 }
 
 // ── Колонки ─────────────────────────────────────────────────────────────
-export async function createColumn(user, boardId, name) {
+const COLUMN_COLORS = new Set(['accent', 'yellow', 'pink', 'green', 'orange', 'purple']);
+
+export async function createColumn(user, boardId, name, color) {
   const spaceId = await spaceIdOfBoard(boardId);
   await assertMember(user, spaceId);
   const clean = requireName(name);
-  const maxOrder = await get('SELECT MAX(sort_order) AS m FROM task_columns WHERE board_id=?', boardId);
-  const id = await insert('task_columns', { board_id: boardId, name: clean, sort_order: (maxOrder?.m ?? -1) + 1 });
+  const maxOrder = await get('SELECT MAX(board_order) AS m FROM task_columns WHERE board_id=?', boardId);
+  const id = await insert('task_columns', {
+    board_id: boardId, name: clean, color: COLUMN_COLORS.has(color) ? color : 'accent',
+    board_order: (maxOrder?.m ?? 0) + 1000,
+  });
   return { id };
 }
 
-export async function renameColumn(user, columnId, name) {
+// Єдина точка редагування колонки: назва/колір/згорнутість/позиція — усе
+// частковими полями в одному тілі запиту, як і в updateCard.
+export async function updateColumn(user, columnId, patch) {
   const boardId = await boardIdOfColumn(columnId);
   const spaceId = await spaceIdOfBoard(boardId);
   await assertMember(user, spaceId);
-  await run('UPDATE task_columns SET name=? WHERE id=?', requireName(name), columnId);
-  return { ok: true };
-}
-
-export async function reorderColumn(user, columnId, sortOrder) {
-  const boardId = await boardIdOfColumn(columnId);
-  const spaceId = await spaceIdOfBoard(boardId);
-  await assertMember(user, spaceId);
-  await run('UPDATE task_columns SET sort_order=? WHERE id=?', Number(sortOrder) || 0, columnId);
+  const data = {};
+  if ('name' in patch) data.name = requireName(patch.name);
+  if ('color' in patch) data.color = COLUMN_COLORS.has(patch.color) ? patch.color : 'accent';
+  if ('collapsed' in patch) data.collapsed = patch.collapsed ? 1 : 0;
+  if ('board_order' in patch) data.board_order = Number(patch.board_order) || 0;
+  if (!Object.keys(data).length) return { ok: true };
+  await run(`UPDATE task_columns SET ${Object.keys(data).map((k) => `${k}=?`).join(',')} WHERE id=?`, ...Object.values(data), columnId);
   return { ok: true };
 }
 
@@ -275,17 +307,25 @@ export async function deleteColumn(user, columnId) {
 }
 
 // ── Картки ──────────────────────────────────────────────────────────────
-export async function createCard(user, boardId, columnId, title) {
+// extra — необовʼязкові поля зі швидкого створення картки (як на
+// референсі: заголовок + одразу виконавець/дати/пріоритет/теги, без
+// відкриття повної картки). Записуються одним INSERT, без пообіцяної
+// field_changed-активності на кожне поле — «створено» й так усе каже.
+export async function createCard(user, boardId, columnId, title, extra = {}) {
   const spaceId = await spaceIdOfBoard(boardId);
   await assertMember(user, spaceId);
   const col = await get('SELECT id FROM task_columns WHERE id=? AND board_id=?', columnId, boardId);
   if (!col) throw Object.assign(new Error('Колонка не належить цій дошці'), { status: 400 });
   const clean = requireName(title, 'назву картки');
   const maxOrder = await get('SELECT MAX(board_order) AS m FROM task_cards WHERE column_id=?', columnId);
-  const id = await insert('task_cards', {
-    board_id: boardId, column_id: columnId, title: clean, board_order: (maxOrder?.m ?? 0) + 1000, created_by: user.id,
-  });
+  const row = { board_id: boardId, column_id: columnId, title: clean, board_order: (maxOrder?.m ?? 0) + 1000, created_by: user.id };
+  if (extra.assignee_user_id) row.assignee_user_id = Number(extra.assignee_user_id);
+  if (extra.due_date) row.due_date = extra.due_date;
+  if (extra.start_date) row.start_date = extra.start_date;
+  if (extra.priority) row.priority = extra.priority;
+  const id = await insert('task_cards', row);
   await logActivity(id, user.id, 'created', null);
+  if (Array.isArray(extra.tag_ids) && extra.tag_ids.length) await setCardTags(user, id, extra.tag_ids);
   return { id };
 }
 
@@ -303,7 +343,7 @@ export async function getCard(user, cardId) {
      LEFT JOIN task_columns col ON col.id=c.column_id
      WHERE c.id=?`, cardId,
   );
-  const columns = await all('SELECT id, name FROM task_columns WHERE board_id=? ORDER BY sort_order, id', boardId);
+  const columns = await all('SELECT id, name, color FROM task_columns WHERE board_id=? ORDER BY board_order, id', boardId);
   const members = await all(
     'SELECT m.user_id, u.name FROM task_space_members m JOIN users u ON u.id=m.user_id WHERE m.space_id=? ORDER BY u.name',
     spaceId,
@@ -342,7 +382,8 @@ export async function getCard(user, cardId) {
     else cardAttachments.push(a);
   }
   return {
-    card, space, board, columns, members, attachments: cardAttachments,
+    card: { ...card, description_blocks: card.description_blocks ? JSON.parse(card.description_blocks) : null },
+    space, board, columns, members, attachments: cardAttachments,
     tags: cardTags, boardTags,
     comments: comments.map((c) => ({ ...c, attachments: byComment.get(c.id) || [] })),
     timeEntries, activity, runningTimer: running || null,
@@ -392,6 +433,16 @@ export async function updateCard(user, cardId, patch) {
       await logActivity(cardId, user.id, 'assigned', { to: name || 'нікого' });
     } else {
       await logActivity(cardId, user.id, 'field_changed', { field: FIELD_LABELS[f] || f, from: current[f], to: v });
+    }
+  }
+  // Блоки опису (Notion-подібний редактор) — окремий випадок: значення це
+  // масив блоків, а не скаляр, і показувати «до/після» цілим JSON-блобом
+  // в Activity нема сенсу — досить короткого запису факту зміни.
+  if ('description_blocks' in patch) {
+    const json = JSON.stringify(patch.description_blocks || []);
+    if (json !== (current.description_blocks || '[]')) {
+      data.description_blocks = json;
+      await logActivity(cardId, user.id, 'description_changed', null);
     }
   }
   if (!Object.keys(data).length) return { ok: true };

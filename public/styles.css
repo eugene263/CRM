@@ -149,7 +149,7 @@ label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px
 .tile .value.pos { color: var(--accent-2); } .tile .value.neg { color: var(--danger); }
 .tile .hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
-/* Канбан воронки лідів */
+/* Канбан воронки лідів / дошки задач */
 .kanban { display: flex; gap: 14px; align-items: flex-start; overflow-x: auto; padding-bottom: 10px; }
 .kanban-col {
   flex: 0 0 250px; width: 250px; background: var(--panel-2); border: 1px solid var(--line);
@@ -157,7 +157,8 @@ label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px
   outline: 2px solid transparent; outline-offset: -2px;
 }
 .kanban-col.drag-over { outline-color: var(--accent); }
-.kanban-col-head { margin-bottom: 10px; }
+.kanban-col.dragging-col { opacity: .4; }
+.kanban-col-head { margin-bottom: 10px; display: flex; align-items: center; gap: 4px; cursor: grab; }
 .kanban-col-title { font-weight: 600; font-size: 13.5px; }
 .kanban-cards { display: flex; flex-direction: column; gap: 8px; min-height: 30px; }
 .kanban-card {
@@ -169,7 +170,61 @@ label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px
 /* Лінія-індикатор: де саме картка ляже, коли її відпустять — між двома
    конкретними картками, а не просто «десь у колонці». */
 .kanban-drop-indicator { height: 3px; border-radius: 2px; background: var(--accent); }
+/* Той самий індикатор, тільки вертикальний — для перетягування КОЛОНОК
+   (між ними, а не карток усередині). */
+.kanban-col-drop-indicator { width: 3px; align-self: stretch; border-radius: 2px; background: var(--accent); }
 .kanban-card-title { font-weight: 500; font-size: 13.5px; }
+
+/* Кольорова пігулка заголовка колонки — і колір, і сама назва обираються
+   при створенні/редагуванні колонки (та сама палітра, що й у тегів). */
+.kanban-col-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
+.kanban-col-rename-input { font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 999px; width: 120px; }
+/* «⋮» і «+» колонки — з'являються тільки при наведенні на колонку, у
+   правому максимальному куті заголовка. */
+.col-menu-btn, .col-add-btn { opacity: 0; transition: opacity .12s; }
+.kanban-col:hover .col-menu-btn, .kanban-col:hover .col-add-btn,
+.col-menu-btn:focus, .col-add-btn:focus { opacity: 1; }
+.task-popover-item.danger { color: var(--danger); }
+
+/* Згорнута колонка — вузька смужка з вертикальним написом (Trello-стиль):
+   картки сховані, розгортається назад кліком по стрілці. */
+.kanban-col.collapsed { flex: 0 0 46px; width: 46px; padding: 10px 6px; display: flex; flex-direction: column; align-items: center; }
+.kanban-col-collapsed-head { cursor: grab; }
+.kanban-col-collapsed-title {
+  writing-mode: vertical-rl; transform: rotate(180deg); font-weight: 700; font-size: 12.5px;
+  margin-top: 10px; text-transform: uppercase; letter-spacing: .02em; white-space: nowrap;
+}
+
+/* Плитка «+ Колонка» — праворуч від останньої колонки дошки, а не кнопка
+   в шапці. */
+.kanban-add-col {
+  flex: 0 0 180px; width: 180px; align-self: stretch; min-height: 64px;
+  border: 1.5px dashed var(--line); border-radius: var(--radius); background: transparent;
+  color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 13px; transition: border-color .12s, color .12s;
+}
+.kanban-add-col:hover { border-color: var(--accent); color: var(--text); }
+
+/* Компактний рядок іконок на плашці картки (виконавець/дати/пріоритет/
+   теги) — значення видно одразу, порожнє поле — просто іконка, на яку
+   можна клікнути й одразу обрати, не заходячи в картку. */
+.kanban-card-mini-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 8px; }
+.task-picker-btn.mini { width: auto; padding: 3px 5px; gap: 3px; font-size: 11.5px; border-radius: 999px; }
+.task-picker-btn.mini:hover, .task-picker-btn.mini:focus { background: var(--panel-2); }
+.kanban-card-timer { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+.kanban-card-timer.live { color: var(--accent-2); font-variant-numeric: tabular-nums; }
+
+/* Швидке створення картки — заголовок і одразу основні поля, без
+   відкриття повної картки (Save/Enter зберігає). */
+.quick-add-box { border: 1.5px solid var(--accent); border-radius: 10px; padding: 8px; margin-top: 8px; background: var(--panel); }
+.quick-add-title-row { display: flex; gap: 6px; align-items: center; }
+.quick-add-title { flex: 1 1 auto; min-width: 0; font-size: 13.5px; }
+.quick-add-rows { display: flex; flex-direction: column; margin-top: 6px; }
+.quick-add-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 6px;
+  background: transparent; border: none; color: var(--text); font-size: 12.5px; cursor: pointer; text-align: left; width: 100%;
+}
+.quick-add-row:hover { background: var(--panel-2); }
 
 /* Картки списків пошуку */
 .list-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
@@ -541,3 +596,41 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 .task-tag-row:hover { background: var(--panel-2); }
 .task-tag-new-row { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-top: 1px solid var(--line); margin-top: 4px; }
 .task-tag-new-row input { flex: 1 1 auto; min-width: 0; }
+
+/* ── Опис задачі: Notion-подібний редактор блоків. Наведення на рядок
+   показує зліва «+» (додати блок нижче) і кошик (видалити цей блок) —
+   як «+» зліва рядка в Notion. ─────────────────────────────────────── */
+.desc-blocks { display: flex; flex-direction: column; gap: 2px; }
+.desc-block { display: flex; align-items: flex-start; gap: 4px; }
+.desc-block-gutter { display: flex; gap: 2px; flex: 0 0 auto; padding-top: 6px; opacity: 0; transition: opacity .12s; }
+.desc-block:hover .desc-block-gutter { opacity: 1; }
+.desc-block-plus, .desc-block-del {
+  width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--muted); border-radius: 5px; cursor: pointer; padding: 0;
+}
+.desc-block-plus:hover, .desc-block-del:hover { background: var(--panel-2); color: var(--text); }
+.desc-block-text {
+  flex: 1 1 auto; min-width: 0; border: none; background: transparent; resize: none;
+  font: inherit; padding: 5px 6px; border-radius: 6px; line-height: 1.5; overflow: hidden;
+}
+.desc-block-text:hover, .desc-block-text:focus { background: var(--panel-2); outline: none; }
+.desc-block > div:not(.desc-block-gutter) { flex: 1 1 auto; min-width: 0; }
+
+.desc-checklist { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
+.desc-checklist-row { display: flex; align-items: center; gap: 8px; }
+.desc-checklist-text { flex: 1 1 auto; min-width: 0; border: none; background: transparent; padding: 4px 6px; border-radius: 6px; font: inherit; }
+.desc-checklist-text:hover, .desc-checklist-text:focus { background: var(--panel-2); outline: none; }
+.desc-checklist-row input[type="checkbox"]:checked + .desc-checklist-text { text-decoration: line-through; color: var(--muted); }
+
+.desc-table-wrap { flex: 1 1 auto; min-width: 0; padding: 4px 0; }
+.desc-table { border-collapse: collapse; width: auto; }
+.desc-table td { border: 1px solid var(--line); padding: 0; white-space: normal; }
+.desc-table td input { width: 100%; min-width: 90px; border: none; background: transparent; padding: 6px 8px; font: inherit; }
+.desc-table td input:focus { outline: none; background: var(--panel-2); }
+.desc-table-toolbar { display: flex; gap: 4px; margin-top: 6px; }
+.desc-table-toolbar .btn { font-size: 11.5px; padding: 4px 8px; }
+
+.desc-toggle-head { display: flex; align-items: center; gap: 4px; }
+.desc-toggle-head .icon { transition: transform .12s; }
+.desc-toggle-title { flex: 1 1 auto; min-width: 0; border: none; background: transparent; padding: 4px 6px; border-radius: 6px; font: inherit; font-weight: 600; }
+.desc-toggle-title:hover, .desc-toggle-title:focus { background: var(--panel-2); outline: none; }

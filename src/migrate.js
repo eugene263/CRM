@@ -180,6 +180,31 @@ const migrations = [
       if (!cols.has('start_date')) await run('ALTER TABLE task_cards ADD COLUMN start_date TEXT');
     },
   },
+  {
+    // Колонки отримують колір (пігулка в заголовку) і згортання; порядок
+    // колонок переїжджає на дробовий board_order (той самий прийом, що
+    // leads.board_order) — щоб колонки можна було перетягувати одна повз
+    // одну, а не лише індекс+1. Наявні колонки отримують board_order у
+    // ТОМУ самому порядку, в якому вони й так стояли (sort_order, id).
+    id: '2026-09-25-task-columns-color-order',
+    async up() {
+      const cols = await columnsOf('task_columns');
+      if (!cols.has('color')) await run(`ALTER TABLE task_columns ADD COLUMN color TEXT NOT NULL DEFAULT 'accent'`);
+      if (!cols.has('collapsed')) await run('ALTER TABLE task_columns ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0');
+      if (!cols.has('board_order')) {
+        await run('ALTER TABLE task_columns ADD COLUMN board_order REAL NOT NULL DEFAULT 0');
+        const rows = await all('SELECT id, board_id FROM task_columns ORDER BY board_id, sort_order, id');
+        let prevBoard = null, order = 0;
+        for (const row of rows) {
+          if (row.board_id !== prevBoard) { prevBoard = row.board_id; order = 0; }
+          await run('UPDATE task_columns SET board_order=? WHERE id=?', order, row.id);
+          order += 1000;
+        }
+      }
+      const cardCols = await columnsOf('task_cards');
+      if (!cardCols.has('description_blocks')) await run('ALTER TABLE task_cards ADD COLUMN description_blocks TEXT');
+    },
+  },
 ];
 
 export async function migrate() {

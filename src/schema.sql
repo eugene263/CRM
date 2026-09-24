@@ -1059,7 +1059,10 @@ CREATE TABLE IF NOT EXISTS task_columns (
   id INTEGER PRIMARY KEY,
   board_id INTEGER NOT NULL REFERENCES task_boards(id),
   name TEXT NOT NULL,
-  sort_order INTEGER NOT NULL DEFAULT 0,
+  color TEXT NOT NULL DEFAULT 'accent',
+  collapsed INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0, -- застаріле: замінене на board_order (дробовий порядок для drag&drop)
+  board_order REAL NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_task_columns_board ON task_columns(board_id);
@@ -1070,6 +1073,7 @@ CREATE TABLE IF NOT EXISTS task_cards (
   column_id INTEGER NOT NULL REFERENCES task_columns(id),
   title TEXT NOT NULL,
   description TEXT,
+  description_blocks TEXT, -- JSON-масив блоків опису (текст/чек-лист/таблиця/спадний список), як у Notion
   start_date TEXT,
   due_date TEXT,
   priority TEXT,
