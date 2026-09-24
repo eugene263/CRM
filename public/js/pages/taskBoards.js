@@ -1907,10 +1907,31 @@ export async function renderTaskBoard(boardId) {
   const SIDEBAR_EXPANDED_KEY = 'task_sidebar_expanded_spaces';
   let sidebarCollapsed = false;
   try { sidebarCollapsed = localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === '1'; } catch { /* приватний режим — ігноруємо */ }
+  // Простір активної дошки примусово розкривається лише при ПЕРШОМУ
+  // рендері меню (інакше активну дошку не було б видно щойно завантаженою) —
+  // якщо робити це на КОЖНОМУ рендері, клік «згорнути» на цьому ж просторі
+  // миттєво скасовувався б цим-таки примусовим розкриттям.
+  let sidebarFirstRender = true;
   function expandedSpaceIds() {
     try { return new Set(JSON.parse(localStorage.getItem(SIDEBAR_EXPANDED_KEY) || '[]')); } catch { return new Set(); }
   }
   function setExpandedSpaceIds(ids) { try { localStorage.setItem(SIDEBAR_EXPANDED_KEY, JSON.stringify([...ids])); } catch { /* ігноруємо */ } }
+
+  function createSpacePrompt() {
+    const input = el('input', { placeholder: 'Назва простору' });
+    const m = modal('Новий простір', el('div', { class: 'field' }, el('label', {}, 'Назва'), input),
+      [actionButton('Створити', async () => {
+        if (!input.value.trim()) return toast('Потрібна назва', true);
+        try {
+          const { id } = await api.post('/task_spaces', { name: input.value.trim() });
+          m.remove();
+          const expanded = expandedSpaceIds();
+          expanded.add(id);
+          setExpandedSpaceIds(expanded);
+          await renderSidebar();
+        } catch (err) { toast(err.message, true); }
+      })]);
+  }
 
   function boardIconPicker(anchor, b) {
     openPopover(anchor, (box2) => {
@@ -1950,9 +1971,12 @@ export async function renderTaskBoard(boardId) {
         renderSidebar();
       },
     }, icon(sidebarCollapsed ? 'chevronRight' : 'chevronLeft', 14));
+    const addSpaceBtn = canCreate ? el('button', {
+      class: 'task-sidebar-toggle task-sidebar-add-space', type: 'button', title: 'Новий простір', onclick: () => createSpacePrompt(),
+    }, icon('plus', 14)) : null;
     sidebar.append(el('div', { class: 'task-sidebar-head' },
       sidebarCollapsed ? null : el('span', { class: 'muted', style: 'font-size:11px;text-transform:uppercase;letter-spacing:.04em;flex:1 1 auto' }, 'Задачі'),
-      toggleBtn));
+      sidebarCollapsed ? null : addSpaceBtn, toggleBtn));
 
     let spaces;
     try { spaces = (await api.get('/task_spaces/nav')).rows; }
@@ -1961,10 +1985,13 @@ export async function renderTaskBoard(boardId) {
     const list = el('div', { class: 'task-sidebar-list' });
     sidebar.append(list);
     const expanded = expandedSpaceIds();
-    // Простір поточної дошки — завжди розгорнутий, інакше активну дошку
-    // просто не видно було б у щойно завантаженому меню.
-    const ownerSpace = spaces.find((sp) => sp.boards.some((b) => b.id === boardId));
-    if (ownerSpace && !expanded.has(ownerSpace.id)) { expanded.add(ownerSpace.id); setExpandedSpaceIds(expanded); }
+    // Простір поточної дошки — розгортається сам лише при ПЕРШОМУ
+    // завантаженні меню (див. коментар біля sidebarFirstRender вище).
+    if (sidebarFirstRender) {
+      const ownerSpace = spaces.find((sp) => sp.boards.some((b) => b.id === boardId));
+      if (ownerSpace && !expanded.has(ownerSpace.id)) { expanded.add(ownerSpace.id); setExpandedSpaceIds(expanded); }
+    }
+    sidebarFirstRender = false;
 
     spaces.forEach((s) => {
       if (sidebarCollapsed) {
@@ -2030,6 +2057,11 @@ export async function renderTaskBoard(boardId) {
         }, icon('plus', 12), 'Нова дошка'));
       }
     });
+    if (sidebarCollapsed && canCreate) {
+      list.append(el('button', {
+        class: 'task-sidebar-tile', type: 'button', title: 'Новий простір', onclick: () => createSpacePrompt(),
+      }, icon('plus', 16)));
+    }
   }
 
   // Попап керування доступом до простору (а отже — до всіх його дошок):
