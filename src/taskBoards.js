@@ -70,6 +70,39 @@ export async function listSpaces(user) {
   );
 }
 
+// Для бокового меню сторінки «Задачі» (Space → Boards деревом) — усі
+// простори користувача РАЗОМ з їхніми дошками (icon/card_count) в двох
+// запитах, а не по одному на простір.
+export async function listSpacesWithBoards(user) {
+  const spaces = canSeeAll(user)
+    ? await all('SELECT * FROM task_spaces ORDER BY created_at DESC')
+    : await all(
+      `SELECT s.* FROM task_spaces s JOIN task_space_members m ON m.space_id=s.id AND m.user_id=?
+       ORDER BY s.created_at DESC`, user.id,
+    );
+  const spaceIds = spaces.map((s) => s.id);
+  let boards = [];
+  let members = [];
+  if (spaceIds.length) {
+    const placeholders = spaceIds.map(() => '?').join(',');
+    boards = await all(
+      `SELECT b.id, b.space_id, b.name, b.icon, b.sort_order,
+              (SELECT COUNT(*) FROM task_cards c WHERE c.board_id=b.id) AS card_count
+       FROM task_boards b WHERE b.space_id IN (${placeholders}) ORDER BY b.sort_order, b.id`,
+      ...spaceIds,
+    );
+    members = await all(
+      `SELECT m.space_id, m.user_id, u.name FROM task_space_members m JOIN users u ON u.id=m.user_id
+       WHERE m.space_id IN (${placeholders}) ORDER BY u.name`,
+      ...spaceIds,
+    );
+  }
+  const byId = new Map(spaces.map((s) => [s.id, { ...s, boards: [], members: [] }]));
+  for (const b of boards) byId.get(b.space_id)?.boards.push(b);
+  for (const m of members) byId.get(m.space_id)?.members.push(m);
+  return [...byId.values()];
+}
+
 export async function createSpace(user, name) {
   const clean = requireName(name);
   const id = await insert('task_spaces', { name: clean, created_by: user.id });
@@ -77,9 +110,13 @@ export async function createSpace(user, name) {
   return { id };
 }
 
-export async function renameSpace(user, spaceId, name) {
+export async function renameSpace(user, spaceId, patch) {
   await assertMember(user, spaceId);
-  await run('UPDATE task_spaces SET name=? WHERE id=?', requireName(name), spaceId);
+  const data = {};
+  if ('name' in patch) data.name = requireName(patch.name);
+  if ('logo_data_url' in patch) data.logo_data_url = patch.logo_data_url || null;
+  if (!Object.keys(data).length) return { ok: true };
+  await run(`UPDATE task_spaces SET ${Object.keys(data).map((k) => `${k}=?`).join(',')} WHERE id=?`, ...Object.values(data), spaceId);
   return { ok: true };
 }
 
@@ -138,10 +175,14 @@ export async function createBoard(user, spaceId, name) {
   return { id };
 }
 
-export async function renameBoard(user, boardId, name) {
+export async function renameBoard(user, boardId, patch) {
   const spaceId = await spaceIdOfBoard(boardId);
   await assertMember(user, spaceId);
-  await run('UPDATE task_boards SET name=? WHERE id=?', requireName(name), boardId);
+  const data = {};
+  if ('name' in patch) data.name = requireName(patch.name);
+  if ('icon' in patch) data.icon = patch.icon || null;
+  if (!Object.keys(data).length) return { ok: true };
+  await run(`UPDATE task_boards SET ${Object.keys(data).map((k) => `${k}=?`).join(',')} WHERE id=?`, ...Object.values(data), boardId);
   return { ok: true };
 }
 
@@ -482,19 +523,31 @@ const AI_DESC_DETAIL = {
   detailed: 'Детально: розгорнутий опис, чіткі кроки виконання, критерії готовності (definition of done), можливі нюанси й ризики.',
 };
 
-export async function generateCardDescription(user, cardId, { notes, detail } = {}) {
+export async function generateCardDescription(user, cardId, { notes, detail, existing } = {}) {
   const { board_id: boardId } = await cardRow(cardId);
   const spaceId = await spaceIdOfBoard(boardId);
   await assertMember(user, spaceId);
   const card = await get('SELECT title FROM task_cards WHERE id=?', cardId);
   const detailKey = AI_DESC_DETAIL[detail] ? detail : 'standard';
-  const prompt = [
-    'Ти — помічник, що пише короткі ділові описи задач для команди в робочому таск-трекері, українською мовою, без зайвої води й без markdown-розмітки (без зірочок, без заголовків на кшталт «Опис:»).',
-    `Назва задачі: "${card.title}"`,
-    notes ? `Додаткові побажання автора: ${String(notes).slice(0, 1000)}` : null,
-    AI_DESC_DETAIL[detailKey],
-    'Виведи ЛИШЕ готовий текст опису — його вставлять прямо в поле опису задачі.',
-  ].filter(Boolean).join('\n');
+  // existing — режим «Уточнити опис»: користувач вже має написаний/
+  // згенерований опис і просить його ДОПОВНИТИ чи ПЕРЕРОБИТИ, а не
+  // почати з чистого аркуша — тому в промпт іде поточний текст як контекст,
+  // і результат повністю ЗАМІНЮЄ його (фронтенд це й робить).
+  const prompt = existing
+    ? [
+      'Ти — помічник, що уточнює й доповнює опис задачі в робочому таск-трекері, українською мовою, без markdown-розмітки (без зірочок, без заголовків на кшталт «Опис:»).',
+      `Назва задачі: "${card.title}"`,
+      `Поточний опис:\n"""\n${String(existing).slice(0, 3000)}\n"""`,
+      `Уточнення від автора, що змінити чи додати: ${String(notes || '').slice(0, 1000)}`,
+      'Виведи ЛИШЕ новий повний текст опису (він повністю замінить старий) — готовий вставити прямо в поле опису задачі.',
+    ].join('\n')
+    : [
+      'Ти — помічник, що пише короткі ділові описи задач для команди в робочому таск-трекері, українською мовою, без зайвої води й без markdown-розмітки (без зірочок, без заголовків на кшталт «Опис:»).',
+      `Назва задачі: "${card.title}"`,
+      notes ? `Додаткові побажання автора: ${String(notes).slice(0, 1000)}` : null,
+      AI_DESC_DETAIL[detailKey],
+      'Виведи ЛИШЕ готовий текст опису — його вставлять прямо в поле опису задачі.',
+    ].filter(Boolean).join('\n');
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (!hasGeminiKeys() && !anthropicKey) {

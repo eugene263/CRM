@@ -816,16 +816,30 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
   position: absolute; display: flex; opacity: 0; pointer-events: none;
   transition: opacity .12s; z-index: 5;
 }
-.desc-table-letterbar { top: -20px; left: 0; height: 18px; }
-.desc-table-numbar { top: 0; left: -20px; flex-direction: column; width: 18px; }
+/* top/left = РІВНО мінус власна висота/ширина (18px), а не «трохи більше» —
+   інакше між барою і краєм .desc-table-wrap лишається порожня смужка в
+   1-2px, де курсор не потрапляє НІ на бару, НІ на сам wrap (:hover), і
+   літери/номери зникають на середині наведення. Впритул — без цього зазору. */
+.desc-table-letterbar { top: -18px; left: 0; height: 18px; }
+.desc-table-numbar { top: 0; left: -18px; flex-direction: column; width: 18px; }
 .desc-table-wrap:hover .desc-table-letterbar,
-.desc-table-wrap:hover .desc-table-numbar { opacity: 1; pointer-events: auto; }
+.desc-table-wrap:hover .desc-table-numbar,
+.desc-table-wrap:hover .desc-table-corner-btn { opacity: 1; pointer-events: auto; }
 .desc-table-letter, .desc-table-num {
   border: 1px solid var(--line); background: var(--panel-2); box-shadow: var(--shadow);
   display: flex; align-items: center; justify-content: center;
   font-size: 10px; color: var(--muted); user-select: none; cursor: grab; flex: 0 0 auto;
 }
 .desc-table-letter:active, .desc-table-num:active { cursor: grabbing; }
+/* Кутовий квадратик (Excel-стиль) — клік виділяє/підсвічує всю таблицю. */
+.desc-table-corner-btn {
+  position: absolute; top: -18px; left: -18px; width: 18px; height: 18px; z-index: 6; padding: 0;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none;
+  transition: opacity .12s, background .12s;
+}
+.desc-table-corner-btn:hover { background: color-mix(in srgb, var(--accent) 30%, var(--panel-2)); color: var(--text); }
+.desc-table.selected td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 /* Лінія-індикатор між колонками/рядками — куди саме впаде перетягнута
    колонка чи рядок (той самий прийом, що й drop-індикатор картки в канбані). */
 .desc-table-col-indicator { width: 2px; align-self: stretch; border-radius: 2px; background: var(--accent); }
@@ -910,19 +924,23 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
   animation: task-ai-panel-in .16s ease-out;
 }
 @keyframes task-ai-panel-in { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-.task-ai-desc-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 600; }
-.task-ai-desc-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
-.task-ai-desc-row { display: flex; align-items: center; gap: 10px; }
-/* Три кнопки деталізації — гармонійно рівними частками в один рядок. */
-.task-ai-level-row { display: flex; gap: 6px; }
+/* Шапка: заголовок, три кнопки деталізації (лівіше хрестика), хрестик. */
+.task-ai-desc-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 600; flex-wrap: wrap; }
+.task-ai-desc-body { padding: 10px 14px 0; }
+.task-ai-level-row { display: flex; gap: 6px; flex: 0 0 auto; }
 .task-ai-level-btn {
-  flex: 1 1 0; padding: 7px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2);
-  color: var(--text); font-size: 12.5px; cursor: pointer; text-align: center; transition: border-color .12s, background .12s;
+  flex: 0 0 auto; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2);
+  color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: border-color .12s, background .12s;
 }
 .task-ai-level-btn:hover { border-color: var(--accent); }
 .task-ai-level-btn.active { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
-.task-ai-desc-input-row { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
-.task-ai-desc-input { flex: 1 1 auto; }
+/* Поле уточнення — велике (~2.5-3× вище за звичайне однорядкове поле) і
+   на всю ширину; кнопка праворуч — тієї ж висоти, що й поле (align-
+   items:stretch), не сплющена іконка, а повноцінна кнопка «Згенерувати»/
+   «Надіслати». */
+.task-ai-desc-input-row { display: flex; align-items: stretch; gap: 8px; padding: 12px 14px; }
+.task-ai-desc-input { flex: 1 1 auto; resize: vertical; min-height: 92px; }
+.task-ai-generate-btn { flex: 0 0 auto; padding: 0 20px; display: inline-flex; align-items: center; justify-content: center; }
 
 /* Мінімалістична анімація генерації — займає те саме місце знизу картки,
    де щойно був попап (плавний shimmer-градієнт + обертова іскорка). */
@@ -936,3 +954,64 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
 .task-ai-loading .icon { color: var(--accent); animation: task-ai-spin 1.6s linear infinite; }
 @keyframes task-ai-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 @keyframes task-ai-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* ── Бокове меню сторінки «Задачі» (Space → Boards деревом) — фіксоване
+   зліва на всіх трьох вьюхах (Дошка/Список/Календар), бо це одна й та
+   сама renderTaskBoard(). Згортається в колонку квадратних плашок-іконок
+   (Space = лого/ініціали, Board — обрана іконка). ────────────────────── */
+.task-sidebar {
+  flex: 0 0 220px; width: 220px; border-right: 1px solid var(--line); padding: 10px 8px;
+  overflow-y: auto; display: flex; flex-direction: column; gap: 2px; transition: width .15s, flex-basis .15s;
+}
+.task-sidebar.collapsed { flex: 0 0 56px; width: 56px; align-items: center; padding: 10px 6px; }
+.task-sidebar-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.task-sidebar.collapsed .task-sidebar-head { justify-content: center; }
+.task-sidebar-toggle {
+  width: 24px; height: 24px; flex: 0 0 24px; padding: 0; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel-2); color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.task-sidebar-toggle:hover { border-color: var(--accent); color: var(--text); }
+.task-sidebar-list { display: flex; flex-direction: column; gap: 2px; width: 100%; }
+.task-sidebar.collapsed .task-sidebar-list { align-items: center; gap: 6px; }
+
+/* Розгорнутий стан — рядок простору (лого + назва + шеврон), дошки під ним. */
+.task-sidebar-space-row {
+  display: flex; align-items: center; gap: 6px; padding: 6px 4px; border-radius: 7px; cursor: pointer;
+  font-size: 12.5px; font-weight: 600; margin-top: 6px;
+}
+.task-sidebar-space-row:hover { background: var(--panel-2); }
+.task-sidebar-space-row .icon { color: var(--muted); flex: 0 0 auto; }
+.task-sidebar-space-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-sidebar-logo-btn {
+  width: 20px; height: 20px; flex: 0 0 20px; padding: 0; border: none; border-radius: 5px; background: transparent;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.task-sidebar-logo-img { width: 100%; height: 100%; object-fit: cover; border-radius: 5px; }
+.task-sidebar-logo-fallback {
+  width: 100%; height: 100%; border-radius: 5px; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: 700;
+}
+.task-sidebar-members { display: flex; gap: 3px; padding: 2px 4px 4px 26px; flex-wrap: wrap; }
+.task-sidebar-board-row {
+  display: flex; align-items: center; gap: 6px; padding: 5px 4px 5px 22px; border-radius: 7px;
+  font-size: 12.5px; color: var(--text); text-decoration: none;
+}
+.task-sidebar-board-row:hover { background: var(--panel-2); }
+.task-sidebar-board-row.active { background: var(--accent-soft); font-weight: 600; }
+.task-sidebar-board-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-sidebar-board-icon {
+  width: 18px; height: 18px; flex: 0 0 18px; padding: 0; border: none; background: transparent; color: var(--muted);
+  border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.task-sidebar-board-icon:hover { background: var(--panel); color: var(--text); }
+
+/* Згорнутий стан — самі квадратні плашки, без назв. */
+.task-sidebar-tile {
+  width: 36px; height: 36px; flex: 0 0 36px; padding: 0; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel-2); color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; overflow: hidden;
+}
+.task-sidebar-tile:hover { border-color: var(--accent); color: var(--text); }
+.task-sidebar-tile.space { color: #fff; background: var(--accent); border-color: var(--accent); }
+.task-sidebar-tile.board.active { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.task-sidebar-tile .task-sidebar-logo-img { border-radius: 8px; }

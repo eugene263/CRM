@@ -1876,6 +1876,36 @@ test('нова дошка отримує три дефолтні колонки'
   assert.deepEqual(board.data.columns.map((c) => c.name), ['До виконання', 'В роботі', 'Готово']);
 });
 
+test('лого простору й іконка дошки редагуються та видно в /task_spaces/nav', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+
+  const logo = dataUrl('лого', 'image/png');
+  const logoUpd = await call(`/api/task_spaces/${spaceId}`, { method: 'PUT', body: { logo_data_url: logo } });
+  assert.equal(logoUpd.status, 200, JSON.stringify(logoUpd.data));
+
+  const iconUpd = await call(`/api/task_boards/${boardId}`, { method: 'PUT', body: { icon: 'grid' } });
+  assert.equal(iconUpd.status, 200, JSON.stringify(iconUpd.data));
+
+  const nav = await call('/api/task_spaces/nav');
+  assert.equal(nav.status, 200, JSON.stringify(nav.data));
+  const space = nav.data.rows.find((s) => s.id === spaceId);
+  assert.ok(space, 'простір має бути в списку nav');
+  assert.equal(space.logo_data_url, logo);
+  const board = space.boards.find((b) => b.id === boardId);
+  assert.ok(board, 'дошка має бути в boards простору');
+  assert.equal(board.icon, 'grid');
+  assert.equal(board.card_count, 0);
+
+  // Перейменування без icon/logo в тілі не скидає їх у null.
+  await call(`/api/task_spaces/${spaceId}`, { method: 'PUT', body: { name: 'Перейменований простір' } });
+  await call(`/api/task_boards/${boardId}`, { method: 'PUT', body: { name: 'Перейменована дошка' } });
+  const navAgain = await call('/api/task_spaces/nav');
+  const spaceAgain = navAgain.data.rows.find((s) => s.id === spaceId);
+  assert.equal(spaceAgain.logo_data_url, logo, 'перейменування не мало скинути лого');
+  assert.equal(spaceAgain.boards.find((b) => b.id === boardId).icon, 'grid', 'перейменування не мало скинути іконку');
+});
+
 test('видалення простору й дошки блокується, поки в них є вкладене', async () => {
   const spaceId = await makeSpace();
   const boardId = await makeBoard(spaceId);

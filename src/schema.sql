@@ -1032,6 +1032,7 @@ CREATE TABLE IF NOT EXISTS client_status_history (
 CREATE TABLE IF NOT EXISTS task_spaces (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
+  logo_data_url TEXT, -- лого простору (data URL) для бокового меню дошок
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -1049,6 +1050,7 @@ CREATE TABLE IF NOT EXISTS task_boards (
   id INTEGER PRIMARY KEY,
   space_id INTEGER NOT NULL REFERENCES task_spaces(id),
   name TEXT NOT NULL,
+  icon TEXT, -- назва іконки (icons.js) для плашки дошки у згорнутому бічному меню
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))

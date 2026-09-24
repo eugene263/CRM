@@ -67,11 +67,15 @@ export async function openLead(leadId, onChange = () => {}) {
       return el('div', { style: 'margin-top:8px' }, input);
     })());
 
-  const actions = el('div', { class: 'row', style: 'margin-top:12px' },
-    el('button', { class: 'btn primary', style: 'flex:0 0 auto', onclick: () => { box.remove(); touchForm(lead, contacts, onChange); } }, withIcon('send', 'Записати тач')),
-    el('button', { class: 'btn', style: 'flex:0 0 auto', onclick: () => { box.remove(); statusForm(lead, onChange); } }, withIcon('flag', 'Змінити статус')),
+  // .row.tight — не .row: без неї спільне правило .row > * { flex: 1 1
+  // 160px } розтягує останній елемент (лічильник відкритих задач, у нього
+  // нема свого inline flex-override, як у кнопок) до мінімум 160px,
+  // утворюючи невиправданий розрив між ним і кнопками зліва.
+  const actions = el('div', { class: 'row tight', style: 'margin-top:12px' },
+    el('button', { class: 'btn primary', onclick: () => { box.remove(); touchForm(lead, contacts, onChange); } }, withIcon('send', 'Записати тач')),
+    el('button', { class: 'btn', onclick: () => { box.remove(); statusForm(lead, onChange); } }, withIcon('flag', 'Змінити статус')),
     (dicts.scripts || []).length ? el('button', {
-      class: 'btn', style: 'flex:0 0 auto',
+      class: 'btn',
       onclick: () => scriptPickerModal(dicts.scripts, {
         onUseInTouch: (script) => { box.remove(); touchForm(lead, contacts, onChange, script.id); },
       }),

@@ -223,6 +223,17 @@ const migrations = [
       if (!cols.has('estimate_minutes')) await run('ALTER TABLE task_cards ADD COLUMN estimate_minutes INTEGER');
     },
   },
+  {
+    // Іконка дошки й лого простору — для плашок у згорнутому боковому
+    // меню сторінки «Задачі» (Space = лого, Board = обрана іконка).
+    id: '2026-09-28-task-boards-icon-space-logo',
+    async up() {
+      const boardCols = await columnsOf('task_boards');
+      if (!boardCols.has('icon')) await run('ALTER TABLE task_boards ADD COLUMN icon TEXT');
+      const spaceCols = await columnsOf('task_spaces');
+      if (!spaceCols.has('logo_data_url')) await run('ALTER TABLE task_spaces ADD COLUMN logo_data_url TEXT');
+    },
+  },
 ];
 
 export async function migrate() {

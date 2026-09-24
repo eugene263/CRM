@@ -29,6 +29,11 @@ const TAG_COLORS = [
 ];
 const tagColorHex = (key) => (TAG_COLORS.find((c) => c.key === key) || TAG_COLORS[0]).hex;
 
+// Куратований набір іконок для плашки дошки у бічному меню — довільна
+// іконка з icons.js, а не довільний файл, щоб плашки лишались однаково
+// охайними в будь-якій темі.
+const BOARD_ICONS = ['grid', 'checkSquare', 'checkCircle', 'flag', 'target', 'folder', 'calendar', 'book', 'layers', 'coins', 'trending', 'award', 'sparkles', 'gauge'];
+
 function tagChip(t) {
   const hex = tagColorHex(t.color);
   return el('span', { class: 'task-tag-chip', style: `background:${hex}22;color:${hex};border-color:${hex}` }, t.name);
@@ -509,6 +514,10 @@ function renderTable(b, scheduleSave) {
   const wrapTable = el('div', { class: 'desc-table-wrap' });
   const letterBar = el('div', { class: 'desc-table-letterbar' });
   const numBar = el('div', { class: 'desc-table-numbar' });
+  // Кутовий квадратик (як в Excel/Google Таблицях) — клік виділяє (підсвічує)
+  // всю таблицю разом.
+  const cornerBtn = el('button', { type: 'button', class: 'desc-table-corner-btn', title: 'Виділити всю таблицю' });
+  cornerBtn.addEventListener('click', (e) => { e.stopPropagation(); currentTable?.classList.toggle('selected'); });
   let draggingCol = null;
   let draggingRow = null;
   function moveColumnTo(from, toIndex) {
@@ -615,7 +624,7 @@ function renderTable(b, scheduleSave) {
       });
       table.append(tr);
     });
-    wrapTable.append(table, letterBar, numBar);
+    wrapTable.append(table, letterBar, numBar, cornerBtn);
     currentTable = table;
     positionOverlays(table);
   }
@@ -953,10 +962,17 @@ export async function renderTaskBoard(boardId) {
   const canCreate = !!ent.can.create;
   const canDelete = !!ent.can.delete;
 
-  const page = el('div', { style: 'display:flex;flex-direction:column;height:100%' });
+  // Зліва — фіксоване бокове меню (Spaces → Boards деревом), окремо від
+  // самого контенту дошки/списку/календаря — те саме меню на всіх трьох
+  // вьюхах, бо це одна й та сама renderTaskBoard(). Можна згорнути в
+  // квадратні плашки-іконки (стан — у localStorage).
+  const page = el('div', { style: 'display:flex;height:100%;min-width:0' });
+  const content = el('div', { style: 'display:flex;flex-direction:column;height:100%;flex:1 1 auto;min-width:0' });
   const head = el('div', { style: 'margin-bottom:10px' });
   const kanban = el('div', { class: 'kanban', style: 'flex:1 1 auto' });
-  page.append(head, kanban);
+  content.append(head, kanban);
+  const sidebar = el('div', { class: 'task-sidebar' });
+  page.append(sidebar, content);
 
   let space, board, members, boardTags, rawColumns;
   let dragging = null;
@@ -1658,7 +1674,118 @@ export async function renderTaskBoard(boardId) {
     return card;
   }
 
+  // ── Бокове меню: Spaces → Boards деревом, фіксоване зліва на всіх трьох
+  // вьюхах (Дошка/Список/Календар), бо все це одна й та сама сторінка.
+  // Згорнуте — квадратні плашки-іконки (Space = лого чи ініціали, Board —
+  // обрана іконка); розгорнуте — звичайне дерево з назвами й лічильником
+  // карток. Стан згорнутості й розкритих просторів — у localStorage, як і
+  // згортання груп головного меню (app.js). ───────────────────────────
+  const SIDEBAR_COLLAPSE_KEY = 'task_sidebar_collapsed';
+  const SIDEBAR_EXPANDED_KEY = 'task_sidebar_expanded_spaces';
+  let sidebarCollapsed = false;
+  try { sidebarCollapsed = localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === '1'; } catch { /* приватний режим — ігноруємо */ }
+  function expandedSpaceIds() {
+    try { return new Set(JSON.parse(localStorage.getItem(SIDEBAR_EXPANDED_KEY) || '[]')); } catch { return new Set(); }
+  }
+  function setExpandedSpaceIds(ids) { try { localStorage.setItem(SIDEBAR_EXPANDED_KEY, JSON.stringify([...ids])); } catch { /* ігноруємо */ } }
+
+  function boardIconPicker(anchor, b) {
+    openPopover(anchor, (box2) => {
+      box2.append(...BOARD_ICONS.map((name) => el('div', {
+        class: 'task-popover-item', onclick: async () => {
+          box2.remove();
+          try { await api.put(`/task_boards/${b.id}`, { icon: name }); await renderSidebar(); }
+          catch (e) { toast(e.message, true); }
+        },
+      }, icon(name, 14))));
+    });
+  }
+
+  function uploadSpaceLogo(s) {
+    const input = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+    input.addEventListener('change', async () => {
+      const file = input.files[0]; if (!file) { input.remove(); return; }
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        await api.put(`/task_spaces/${s.id}`, { logo_data_url: dataUrl });
+        await renderSidebar();
+      } catch (e) { toast(e.message, true); }
+      input.remove();
+    });
+    document.body.append(input);
+    input.click();
+  }
+
+  async function renderSidebar() {
+    sidebar.textContent = '';
+    sidebar.classList.toggle('collapsed', sidebarCollapsed);
+    const toggleBtn = el('button', {
+      class: 'task-sidebar-toggle', type: 'button', title: sidebarCollapsed ? 'Розгорнути меню' : 'Згорнути меню',
+      onclick: () => {
+        sidebarCollapsed = !sidebarCollapsed;
+        try { localStorage.setItem(SIDEBAR_COLLAPSE_KEY, sidebarCollapsed ? '1' : '0'); } catch { /* ігноруємо */ }
+        renderSidebar();
+      },
+    }, icon(sidebarCollapsed ? 'chevronRight' : 'chevronLeft', 14));
+    sidebar.append(el('div', { class: 'task-sidebar-head' },
+      sidebarCollapsed ? null : el('span', { class: 'muted', style: 'font-size:11px;text-transform:uppercase;letter-spacing:.04em;flex:1 1 auto' }, 'Задачі'),
+      toggleBtn));
+
+    let spaces;
+    try { spaces = (await api.get('/task_spaces/nav')).rows; }
+    catch (e) { sidebar.append(el('div', { class: 'muted', style: 'padding:8px;font-size:12px' }, e.message)); return; }
+
+    const list = el('div', { class: 'task-sidebar-list' });
+    sidebar.append(list);
+    const expanded = expandedSpaceIds();
+    // Простір поточної дошки — завжди розгорнутий, інакше активну дошку
+    // просто не видно було б у щойно завантаженому меню.
+    const ownerSpace = spaces.find((sp) => sp.boards.some((b) => b.id === boardId));
+    if (ownerSpace && !expanded.has(ownerSpace.id)) { expanded.add(ownerSpace.id); setExpandedSpaceIds(expanded); }
+
+    spaces.forEach((s) => {
+      if (sidebarCollapsed) {
+        list.append(el('button', {
+          class: 'task-sidebar-tile space', type: 'button', title: s.name,
+          onclick: () => { location.hash = `#/space/${s.id}`; },
+        }, s.logo_data_url ? el('img', { src: s.logo_data_url, class: 'task-sidebar-logo-img' }) : el('span', {}, initials(s.name))));
+        s.boards.forEach((b) => {
+          list.append(el('button', {
+            class: `task-sidebar-tile board${b.id === boardId ? ' active' : ''}`, type: 'button', title: b.name,
+            onclick: () => { location.hash = `#/board/${b.id}`; },
+          }, icon(b.icon || 'grid', 16)));
+        });
+        return;
+      }
+      const isOpen = expanded.has(s.id);
+      const logoBtn = el('button', {
+        class: 'task-sidebar-logo-btn', type: 'button', title: canEdit ? 'Змінити лого простору' : s.name,
+        onclick: (e) => { e.stopPropagation(); if (canEdit) uploadSpaceLogo(s); },
+      }, s.logo_data_url ? el('img', { src: s.logo_data_url, class: 'task-sidebar-logo-img small' }) : el('span', { class: 'task-sidebar-logo-fallback' }, initials(s.name)));
+      const spaceRow = el('div', {
+        class: 'task-sidebar-space-row', onclick: () => {
+          if (isOpen) expanded.delete(s.id); else expanded.add(s.id);
+          setExpandedSpaceIds(expanded); renderSidebar();
+        },
+      }, icon(isOpen ? 'chevronDown' : 'chevronRight', 12), logoBtn, el('span', { class: 'task-sidebar-space-name' }, s.name));
+      list.append(spaceRow);
+      if (!isOpen) return;
+      s.members?.length ? list.append(el('div', { class: 'task-sidebar-members' },
+        ...s.members.slice(0, 6).map((m) => avatarEl(m.name, m.user_id, 18)))) : null;
+      s.boards.forEach((b) => {
+        const iconBtn = el('button', {
+          class: 'task-sidebar-board-icon', type: 'button', title: canEdit ? 'Змінити іконку дошки' : b.name,
+          onclick: (e) => { e.stopPropagation(); if (canEdit) boardIconPicker(iconBtn, b); },
+        }, icon(b.icon || 'grid', 13));
+        list.append(el('a', {
+          href: `#/board/${b.id}`, class: `task-sidebar-board-row${b.id === boardId ? ' active' : ''}`,
+        }, iconBtn, el('span', { class: 'task-sidebar-board-name' }, b.name), el('span', { class: 'muted', style: 'font-size:11px' }, String(b.card_count))));
+      });
+    });
+  }
+
   await reload();
+  await renderSidebar();
   return page;
 }
 
@@ -1875,22 +2002,35 @@ export async function openTaskCard(cardId, onChange = () => {}) {
     // ── AI-генерація опису: попап знизу картки (position:absolute bottom:0
     // відносно .task-drawer — сам box має position:relative), закривається
     // по надсиланню, і на його місці — мінімалістична анімація, поки йде
-    // запит; результат дописується в блоки опису (замінює єдиний порожній
-    // блок за замовчуванням або додається до наявного вмісту) і одразу
-    // видно через звичайний refresh(). ──────────────────────────────────
-    async function generateAiDescription({ notes, detail }) {
+    // запит. Два режими: «з нуля» — результат дописується в блоки опису
+    // (замінює єдиний порожній блок за замовчуванням або додається до
+    // наявного вмісту); editExisting («Уточнити опис») — поточний опис
+    // передається як контекст, а результат ПОВНІСТЮ його замінює. ───────
+    async function generateAiDescription({ notes, detail, editExisting }) {
       box.querySelector('.task-ai-loading')?.remove();
-      const loading = el('div', { class: 'task-ai-loading' }, icon('sparkles', 15), el('span', {}, 'Генерую опис…'));
+      const loading = el('div', { class: 'task-ai-loading' }, icon('sparkles', 15), el('span', {}, editExisting ? 'Оновлюю опис…' : 'Генерую опис…'));
       box.append(loading);
       try {
-        const res = await api.post(`/task_cards/${cardId}/generate_description`, { notes, detail });
+        const body = { notes, detail };
+        if (editExisting) {
+          body.existing = (card.description_blocks || [])
+            .filter((b) => b.type === 'paragraph')
+            .map((b) => String(b.text || '').replace(/<[^>]+>/g, ' ').trim())
+            .filter(Boolean).join('\n');
+        }
+        const res = await api.post(`/task_cards/${cardId}/generate_description`, body);
         const text = String(res.text || '').trim();
         if (text) {
           const newBlocks = text.split(/\n+/).map((line) => line.trim()).filter(Boolean).map((line) => ({ ...makeBlock('paragraph'), text: line }));
-          const current = card.description_blocks && card.description_blocks.length ? card.description_blocks : null;
-          const isSingleEmpty = current && current.length === 1 && current[0].type === 'paragraph'
-            && !String(current[0].text || '').replace(/<[^>]+>/g, '').trim();
-          const finalBlocks = (!current || isSingleEmpty) ? newBlocks : [...current, ...newBlocks];
+          let finalBlocks;
+          if (editExisting) {
+            finalBlocks = newBlocks;
+          } else {
+            const current = card.description_blocks && card.description_blocks.length ? card.description_blocks : null;
+            const isSingleEmpty = current && current.length === 1 && current[0].type === 'paragraph'
+              && !String(current[0].text || '').replace(/<[^>]+>/g, '').trim();
+            finalBlocks = (!current || isSingleEmpty) ? newBlocks : [...current, ...newBlocks];
+          }
           await api.put(`/task_cards/${cardId}`, { description_blocks: finalBlocks });
         }
         await refresh();
@@ -1898,6 +2038,11 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       finally { loading.remove(); }
     }
 
+    // Три кнопки рівня деталізації — тепер у шапці попапу (зліва від
+    // хрестика), а не окремим рядком у тілі; поле уточнення — велике
+    // (textarea, ~в 2.5-3 рази вища за звичайне однорядкове поле), кнопка
+    // праворуч від нього — саме «Згенерувати» (текстова, на всю висоту
+    // поля), а не сплющена іконка-«надіслати».
     function openAiDescPanel() {
       box.querySelector('.task-ai-desc-panel')?.remove();
       let detail = 'standard';
@@ -1911,31 +2056,60 @@ export async function openTaskCard(cardId, onChange = () => {}) {
         type: 'button', class: `task-ai-level-btn${detail === key ? ' active' : ''}`,
         onclick: () => { detail = key; renderPanel(); },
       }, label);
-      const notesInput = el('input', {
-        class: 'task-ai-desc-input', placeholder: 'Уточніть, що додати в опис (необов’язково)…',
-        onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); doGenerate(); } },
-      });
+      const notesInput = el('textarea', { class: 'task-ai-desc-input', rows: 5, placeholder: 'Уточніть, що додати в опис (необов’язково)…' });
       function renderPanel() {
         panel.textContent = '';
         panel.append(
           el('div', { class: 'task-ai-desc-head' },
-            withIcon('sparkles', 'AI-опис задачі'), el('div', { style: 'flex:1 1 auto' }),
+            withIcon('sparkles', 'AI-опис задачі'),
+            el('div', { style: 'flex:1 1 auto' }),
+            el('div', { class: 'task-ai-level-row' }, levelBtn('brief', 'Коротко'), levelBtn('standard', 'Стандартно'), levelBtn('detailed', 'Детально')),
             el('button', { class: 'btn small icon-only', type: 'button', onclick: () => panel.remove() }, icon('close', 13))),
           el('div', { class: 'task-ai-desc-body' },
-            el('div', { class: 'task-ai-desc-row' },
-              el('div', { class: 'muted', style: 'font-size:12.5px;flex:1 1 auto' }, 'Опишу задачу на основі назви — можна одразу уточнити деталі нижче.'),
-              el('button', { class: 'btn primary small', type: 'button', onclick: doGenerate }, withIcon('sparkles', 'Згенерувати'))),
-            el('div', { class: 'task-ai-level-row' }, levelBtn('brief', 'Коротко'), levelBtn('standard', 'Стандартно'), levelBtn('detailed', 'Детально'))),
+            el('div', { class: 'muted', style: 'font-size:12.5px' }, 'Опишу задачу на основі назви — можна одразу уточнити деталі нижче.')),
           el('div', { class: 'task-ai-desc-input-row' },
             notesInput,
-            el('button', { class: 'btn primary icon-only', type: 'button', title: 'Надіслати', onclick: doGenerate }, icon('send', 14))));
+            el('button', { class: 'btn primary task-ai-generate-btn', type: 'button', onclick: doGenerate }, withIcon('sparkles', 'Згенерувати'))));
       }
       renderPanel();
       box.append(panel);
       notesInput.focus();
     }
+
+    // Кнопка «Редагувати через AI» — з'являється лише коли в описі вже є
+    // згенерований/написаний зміст; той самий попап-«bottom sheet», але
+    // спрощений: без рівнів деталізації (тут не «з нуля», а уточнення
+    // наявного) — просто поле й кнопка «Надіслати», результат ПОВНІСТЮ
+    // замінює поточний опис (а не дописується до нього).
+    function openAiEditPanel() {
+      box.querySelector('.task-ai-desc-panel')?.remove();
+      const panel = el('div', { class: 'task-ai-desc-panel' });
+      const notesInput = el('textarea', { class: 'task-ai-desc-input', rows: 5, placeholder: 'Що додати чи змінити в описі…' });
+      const doSend = () => {
+        const notes = notesInput.value.trim();
+        if (!notes) { notesInput.focus(); return; }
+        panel.remove();
+        generateAiDescription({ notes, detail: 'standard', editExisting: true });
+      };
+      panel.append(
+        el('div', { class: 'task-ai-desc-head' },
+          withIcon('sparkles', 'Уточнити опис'), el('div', { style: 'flex:1 1 auto' }),
+          el('button', { class: 'btn small icon-only', type: 'button', onclick: () => panel.remove() }, icon('close', 13))),
+        el('div', { class: 'task-ai-desc-input-row' },
+          notesInput,
+          el('button', { class: 'btn primary task-ai-generate-btn', type: 'button', onclick: doSend }, withIcon('send', 'Надіслати'))));
+      box.append(panel);
+      notesInput.focus();
+    }
+
+    const descHasContent = card.description_blocks && card.description_blocks.length
+      && !(card.description_blocks.length === 1 && card.description_blocks[0].type === 'paragraph'
+        && !String(card.description_blocks[0].text || '').replace(/<[^>]+>/g, '').trim());
     const aiDescBtn = el('button', { class: 'task-ai-desc-btn', type: 'button', title: 'Згенерувати опис через AI', onclick: openAiDescPanel }, icon('sparkles', 15));
-    const descHeader = el('div', { class: 'task-desc-header' }, el('span', { class: 'muted', style: 'font-size:12px' }, 'Опис'), el('div', { style: 'flex:1 1 auto' }), aiDescBtn);
+    const aiEditBtn = descHasContent
+      ? el('button', { class: 'task-ai-desc-btn', type: 'button', title: 'Уточнити опис через AI', onclick: openAiEditPanel }, icon('edit', 13))
+      : null;
+    const descHeader = el('div', { class: 'task-desc-header' }, el('span', { class: 'muted', style: 'font-size:12px' }, 'Опис'), el('div', { style: 'flex:1 1 auto' }), aiEditBtn, aiDescBtn);
 
     const fileInput = el('input', { type: 'file', style: 'display:none' });
     fileInput.addEventListener('change', async () => {
@@ -1973,7 +2147,7 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       el('div', { class: 'task-field-table' },
         fieldRow(fieldCell('dot', 'Статус', statusField), fieldCell('user', 'Виконавець', assigneeField)),
         fieldRow(fieldCell('calendar', 'Дати', datesCell), fieldCell('flag', 'Пріоритет', priorityField)),
-        fieldRow(fieldCell('gauge', 'Estimate', estimateField), fieldCell('idCard', 'Автор', authorField)),
+        fieldRow(fieldCell('idCard', 'Автор', authorField), fieldCell('gauge', 'Estimate', estimateField)),
         fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('tag', 'Теги', tagsField))));
     const scroll = el('div', { class: 'task-drawer-scroll' },
       descHeader,

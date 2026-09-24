@@ -973,13 +973,20 @@ export async function handleApi(req, res, url) {
     }
     return fail(res, 405, 'Метод не підтримується');
   }
+  // Бокове меню сторінки «Задачі» (Space → Boards деревом) — усі простори
+  // РАЗОМ з їхніми дошками, в двох запитах.
+  if (seg[0] === 'task_spaces' && seg[1] === 'nav' && req.method === 'GET') {
+    if (!can(user, 'task_spaces', 'read')) return fail(res, 403, 'Немає доступу до задач');
+    return ok(res, { rows: await taskBoards.listSpacesWithBoards(user) });
+  }
   if (seg[0] === 'task_spaces' && seg[1] && !Number.isNaN(Number(seg[1]))) {
     if (!can(user, 'task_spaces', 'read')) return fail(res, 403, 'Немає доступу до задач');
     const spaceId = Number(seg[1]);
     if (!seg[2] && req.method === 'GET') return ok(res, await taskBoards.getSpace(user, spaceId));
     if (!seg[2] && req.method === 'PUT') {
       if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати простір');
-      return ok(res, await taskBoards.renameSpace(user, spaceId, (await readBody(req)).name));
+      const body = await readBody(req, taskBoards.MAX_FILE_BYTES);
+      return ok(res, await taskBoards.renameSpace(user, spaceId, body));
     }
     if (!seg[2] && req.method === 'DELETE') {
       if (!can(user, 'task_spaces', 'delete')) return fail(res, 403, 'Немає прав видаляти простори');
@@ -1005,7 +1012,7 @@ export async function handleApi(req, res, url) {
     if (!seg[2] && req.method === 'GET') return ok(res, await taskBoards.getBoard(user, boardId));
     if (!seg[2] && req.method === 'PUT') {
       if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати дошку');
-      return ok(res, await taskBoards.renameBoard(user, boardId, (await readBody(req)).name));
+      return ok(res, await taskBoards.renameBoard(user, boardId, await readBody(req)));
     }
     if (!seg[2] && req.method === 'DELETE') {
       if (!can(user, 'task_spaces', 'delete')) return fail(res, 403, 'Немає прав видаляти дошки');
