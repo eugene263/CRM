@@ -124,6 +124,12 @@ input, select, textarea {
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; width: 100%;
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+/* Чекбокси НІКОЛИ не мають розтягуватись на всю ширину контейнера — той
+   самий width:100% вище чіпляється й до них (це властивість, не правило:
+   вона застосовується per-property, специфічність селектора тут ні до
+   чого, поки хтось явно не перекриє width), і при цьому один-єдиний
+   квадратик перетворюється на розплющену смужку на всю ширину рядка. */
+input[type="checkbox"], input[type="radio"] { width: auto; flex: 0 0 auto; }
 label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
 .field { margin-bottom: 12px; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
@@ -237,11 +243,16 @@ label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px
 .list-col-name { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .list-due { color: var(--accent-2); }
 
-/* Фільтри дошки (мультивибір-попапи) і квадратна плашка меню дошки —
-   зліва направо: [Фільтри] [Виконавці] [⋮]. */
+/* Фільтри дошки (мультивибір-попапи) і квадратна плашка «⋮» — і меню
+   дошки (зліва направо: [Фільтри] [Виконавці] [⋮]), і меню картки (в
+   заголовку модалки). Явний flex: 0 0 32px — інакше в рядку з класом
+   .row (не .row.tight) її розтягує спільне правило .row > * { flex: 1 1
+   160px }: воно переможе width за пріоритетом властивості flex-basis
+   над width для флекс-елементів (був баг: кнопка ставала ~190-360px
+   замість квадратної). */
 .task-filter-btn { font-size: 12.5px; }
 .task-board-menu-btn {
-  width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; flex: 0 0 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); color: var(--text); cursor: pointer;
 }
 .task-board-menu-btn:hover { border-color: var(--accent); }

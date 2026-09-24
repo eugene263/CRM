@@ -70,11 +70,30 @@ function readFileAsDataUrl(file) {
 // Спливаюче меню біля кнопки-власника — той самий прийом, що вже є в
 // openColorMenu мап клієнта: рендериться в document.body (не всередині
 // попапа картки, щоб не обрізалось overflow), закривається кліком повз.
+// Повторний клік по тій самій кнопці, поки її попап ще відкритий, —
+// ЗАКРИВАЄ його, а не відкриває другий поверх першого (був баг). Перевірку
+// робимо через box.isConnected, а не окремий «close»-колбек — бо більшість
+// викликів самі роблять box2.remove() при виборі пункту, в обхід будь-якого
+// колбека, і лише isConnected лишається правдивим джерелом «ще відкрито».
 function openPopover(anchor, build) {
+  if (anchor._popoverBox && anchor._popoverBox.isConnected) {
+    anchor._popoverBox.remove();
+    anchor._popoverBox = null;
+    return null;
+  }
   const rect = anchor.getBoundingClientRect();
-  const box = el('div', { class: 'task-popover', style: `left:${rect.left}px;top:${rect.bottom + 4}px` });
+  const box = el('div', { class: 'task-popover', style: `top:${rect.bottom + 4}px;visibility:hidden` });
   build(box, () => box.remove());
   document.body.append(box);
+  anchor._popoverBox = box;
+  // Позиціонування по горизонталі: за замовчуванням ліва межа попапу = ліва
+  // межа кнопки, але якщо кнопка близько до правого краю екрана (як
+  // «Фільтри»/«Виконавці» в шапці дошки) і попап так вилазить за край —
+  // приліплюємо ПРАВУ межу попапу до правої межі кнопки, він росте вліво.
+  const boxWidth = box.offsetWidth;
+  const left = (rect.left + boxWidth > window.innerWidth - 8) ? Math.max(8, rect.right - boxWidth) : rect.left;
+  box.style.left = `${left}px`;
+  box.style.visibility = '';
   const close = (e) => { if (!box.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) { box.remove(); document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
   return box;
@@ -894,7 +913,7 @@ export async function renderTaskBoard(boardId) {
     const viewBtn = (key, label) => el('button', {
       class: `btn small${view === key ? ' active' : ''}`, onclick: () => { view = key; renderBody(); },
     }, label);
-    head.append(el('div', { class: 'row', style: 'align-items:center;gap:8px;flex-wrap:wrap' },
+    head.append(el('div', { class: 'row tight', style: 'align-items:center;gap:8px;flex-wrap:wrap' },
       el('a', { href: `#/space/${space.id}`, style: 'display:inline-flex;align-items:center;gap:4px;font-size:12.5px' },
         icon('chevronLeft', 13), space.name),
       el('b', { style: 'font-size:16px' }, board.name),
@@ -1403,7 +1422,16 @@ export async function openTaskCard(cardId, onChange = () => {}) {
         catch (e) { toast(e.message, true); }
       },
     }, withIcon(isRunning ? 'pause' : 'play', isRunning ? 'Зупинити' : 'Почати'));
-    const timeLabel = el('span', { class: 'muted', style: 'font-size:12px' }, formatSeconds(totalSeconds));
+    // Клік на суму часу — редагувати останній завершений запис (той самий
+    // попап, що й з Activity). Поки таймер йде, число ще не «зафіксоване»
+    // (постійно росте), тому клікабельним воно стає лише коли зупинено.
+    const lastEntry = [...timeEntries].filter((t) => t.ended_at).sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)))[0];
+    const timeLabelClickable = !isRunning && !!lastEntry;
+    const timeLabel = el('span', {
+      class: `muted${timeLabelClickable ? ' activity-clickable' : ''}`, style: 'font-size:12px',
+      title: timeLabelClickable ? 'Редагувати запис часу' : undefined,
+      onclick: timeLabelClickable ? () => editTimeEntry(lastEntry.id) : undefined,
+    }, formatSeconds(totalSeconds));
     if (isRunning) {
       const startedAt = new Date(runningTimer.started_at).getTime();
       const tick = () => { timeLabel.textContent = formatSeconds(totalSeconds + Math.floor((Date.now() - startedAt) / 1000)); };
@@ -1430,7 +1458,7 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       fileInput.value = '';
     });
 
-    const cardMenuBtn = el('button', { class: 'btn small icon-only', title: 'Меню задачі' }, icon('more', 14));
+    const cardMenuBtn = el('button', { class: 'task-board-menu-btn', title: 'Меню задачі' }, icon('more', 14));
     cardMenuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       openPopover(cardMenuBtn, (box2) => {
@@ -1446,7 +1474,7 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       });
     });
     const main = el('div', { class: 'task-drawer-main' },
-      el('div', { class: 'row', style: 'align-items:center;gap:8px' },
+      el('div', { class: 'row tight', style: 'align-items:center;gap:8px' },
         el('div', { class: 'task-drawer-crumb', style: 'flex:1 1 auto' }, [space?.name, board?.name].filter(Boolean).join(' / ')),
         cardMenuBtn),
       titleInput,
