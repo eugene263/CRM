@@ -160,14 +160,82 @@ export async function getBoard(user, boardId) {
   );
   const columns = await all('SELECT * FROM task_columns WHERE board_id=? ORDER BY sort_order, id', boardId);
   const cards = await all(
-    `SELECT c.id, c.column_id, c.title, c.priority, c.due_date, c.assignee_user_id, c.tags, c.board_order,
+    `SELECT c.id, c.column_id, c.title, c.priority, c.due_date, c.start_date, c.assignee_user_id, c.board_order,
             u.name AS assignee_name
      FROM task_cards c LEFT JOIN users u ON u.id=c.assignee_user_id
      WHERE c.board_id=? ORDER BY c.board_order`, boardId,
   );
+  const cardIds = cards.map((c) => c.id);
+  const tagsByCard = new Map();
+  if (cardIds.length) {
+    const tagRows = await all(
+      `SELECT ct.card_id, t.id, t.name, t.color FROM task_card_tags ct
+       JOIN task_tags t ON t.id=ct.tag_id WHERE ct.card_id IN (${cardIds.map(() => '?').join(',')})`,
+      ...cardIds,
+    );
+    for (const r of tagRows) {
+      if (!tagsByCard.has(r.card_id)) tagsByCard.set(r.card_id, []);
+      tagsByCard.get(r.card_id).push({ id: r.id, name: r.name, color: r.color });
+    }
+  }
   const byColumn = new Map(columns.map((c) => [c.id, { ...c, cards: [] }]));
-  for (const card of cards) byColumn.get(card.column_id)?.cards.push(card);
+  for (const card of cards) byColumn.get(card.column_id)?.cards.push({ ...card, tags: tagsByCard.get(card.id) || [] });
   return { space, board, members, columns: [...byColumn.values()] };
+}
+
+// ── Теги (керовані записи на дошку: назва + колір) ─────────────────────
+export async function listTags(user, boardId) {
+  const spaceId = await spaceIdOfBoard(boardId);
+  await assertMember(user, spaceId);
+  return all('SELECT id, name, color FROM task_tags WHERE board_id=? ORDER BY name', boardId);
+}
+
+export async function createTag(user, boardId, name, color) {
+  const spaceId = await spaceIdOfBoard(boardId);
+  await assertMember(user, spaceId);
+  const clean = requireName(name, 'назву тегу');
+  const id = await insert('task_tags', { board_id: boardId, name: clean, color: color || 'accent' });
+  return { id };
+}
+
+export async function updateTag(user, tagId, { name, color }) {
+  const tag = await get('SELECT * FROM task_tags WHERE id=?', tagId);
+  if (!tag) throw Object.assign(new Error('Тег не знайдено'), { status: 404 });
+  const spaceId = await spaceIdOfBoard(tag.board_id);
+  await assertMember(user, spaceId);
+  const data = {};
+  if (name != null) data.name = requireName(name, 'назву тегу');
+  if (color != null) data.color = color;
+  if (Object.keys(data).length) {
+    await run(`UPDATE task_tags SET ${Object.keys(data).map((k) => `${k}=?`).join(',')} WHERE id=?`, ...Object.values(data), tagId);
+  }
+  return { ok: true };
+}
+
+export async function deleteTag(user, tagId) {
+  const tag = await get('SELECT * FROM task_tags WHERE id=?', tagId);
+  if (!tag) throw Object.assign(new Error('Тег не знайдено'), { status: 404 });
+  const spaceId = await spaceIdOfBoard(tag.board_id);
+  await assertMember(user, spaceId);
+  await run('DELETE FROM task_tags WHERE id=?', tagId); // task_card_tags має ON DELETE CASCADE
+  return { ok: true };
+}
+
+export async function setCardTags(user, cardId, tagIds) {
+  const { board_id: boardId } = await cardRow(cardId);
+  const spaceId = await spaceIdOfBoard(boardId);
+  await assertMember(user, spaceId);
+  const ids = [...new Set((tagIds || []).map(Number).filter((n) => Number.isFinite(n)))];
+  if (ids.length) {
+    const valid = await all(`SELECT id FROM task_tags WHERE board_id=? AND id IN (${ids.map(() => '?').join(',')})`, boardId, ...ids);
+    if (valid.length !== ids.length) throw Object.assign(new Error('Тег не належить цій дошці'), { status: 400 });
+  }
+  const before = (await all('SELECT tag_id FROM task_card_tags WHERE card_id=?', cardId)).map((r) => r.tag_id).sort();
+  await run('DELETE FROM task_card_tags WHERE card_id=?', cardId);
+  for (const tagId of ids) await run('INSERT INTO task_card_tags (card_id, tag_id) VALUES (?, ?)', cardId, tagId);
+  const after = [...ids].sort();
+  if (before.length !== after.length || before.some((v, i) => v !== after[i])) await logActivity(cardId, user.id, 'tags_changed', null);
+  return { ok: true };
 }
 
 // ── Колонки ─────────────────────────────────────────────────────────────
@@ -263,6 +331,10 @@ export async function getCard(user, cardId) {
   const running = await get(
     'SELECT id, started_at FROM task_time_entries WHERE card_id=? AND user_id=? AND ended_at IS NULL', cardId, user.id,
   );
+  const cardTags = await all(
+    `SELECT t.id, t.name, t.color FROM task_card_tags ct JOIN task_tags t ON t.id=ct.tag_id WHERE ct.card_id=? ORDER BY t.name`, cardId,
+  );
+  const boardTags = await all('SELECT id, name, color FROM task_tags WHERE board_id=? ORDER BY name', boardId);
   const byComment = new Map();
   const cardAttachments = [];
   for (const a of attachments) {
@@ -271,17 +343,39 @@ export async function getCard(user, cardId) {
   }
   return {
     card, space, board, columns, members, attachments: cardAttachments,
+    tags: cardTags, boardTags,
     comments: comments.map((c) => ({ ...c, attachments: byComment.get(c.id) || [] })),
     timeEntries, activity, runningTimer: running || null,
     totalSeconds: timeEntries.reduce((s, t) => s + (t.seconds || 0), 0),
   };
 }
 
-const CARD_FIELDS = ['title', 'description', 'due_date', 'priority', 'assignee_user_id', 'tags'];
-const FIELD_LABELS = { title: 'назву', description: 'опис', due_date: 'дедлайн', priority: 'пріоритет', tags: 'теги' };
+const CARD_FIELDS = ['title', 'description', 'start_date', 'due_date', 'priority', 'assignee_user_id'];
+const FIELD_LABELS = { title: 'назву', description: 'опис', start_date: 'дату початку', due_date: 'дедлайн', priority: 'пріоритет' };
+
+// Якщо задачі щойно поставили дату початку, а вона й досі лежить у
+// колонці ДО «До виконання»/«В роботі»/«Готово» (тобто в якомусь
+// «беклозі») — переносимо в «До виконання» самі, як і з авто-трекером
+// часу: звірка за НАЗВОЮ колонки, мовчки нічого не робить, якщо такої
+// колонки на дошці нема або колонку перейменували.
+const ACTIVE_COLUMN_NAMES = new Set(['до виконання', 'в роботі', 'готово']);
+async function autoMoveOnStartDate(cardId, boardId, currentColumnId, userId) {
+  const current = await get('SELECT name FROM task_columns WHERE id=?', currentColumnId);
+  if (current && ACTIVE_COLUMN_NAMES.has(String(current.name || '').trim().toLowerCase())) return;
+  // Порівнюємо в JS, а не через SQL LOWER() — та вбудована в SQLite
+  // LOWER() опрацьовує лише ASCII й мовчки НЕ переводить кирилицю в
+  // нижній регістр, тож 'До виконання' ніколи не збігся б із власним же
+  // рядком-літералом у запиті (спіймано власним тестом).
+  const columns = await all('SELECT id, name FROM task_columns WHERE board_id=?', boardId);
+  const todo = columns.find((c) => String(c.name || '').trim().toLowerCase() === 'до виконання');
+  if (!todo || todo.id === currentColumnId) return;
+  const maxOrder = await get('SELECT MAX(board_order) AS m FROM task_cards WHERE column_id=?', todo.id);
+  await run('UPDATE task_cards SET column_id=?, board_order=? WHERE id=?', todo.id, (maxOrder?.m ?? 0) + 1000, cardId);
+  await logActivity(cardId, userId, 'moved', { from: current?.name || '—', to: todo.name, auto: true });
+}
 
 export async function updateCard(user, cardId, patch) {
-  const { board_id: boardId } = await cardRow(cardId);
+  const { board_id: boardId, column_id: columnId } = await cardRow(cardId);
   const spaceId = await spaceIdOfBoard(boardId);
   await assertMember(user, spaceId);
   const current = await get('SELECT * FROM task_cards WHERE id=?', cardId);
@@ -303,6 +397,9 @@ export async function updateCard(user, cardId, patch) {
   if (!Object.keys(data).length) return { ok: true };
   data.updated_at = new Date().toISOString();
   await run(`UPDATE task_cards SET ${Object.keys(data).map((k) => `${k}=?`).join(',')} WHERE id=?`, ...Object.values(data), cardId);
+  if ('start_date' in data && !current.start_date && data.start_date) {
+    await autoMoveOnStartDate(cardId, boardId, columnId, user.id);
+  }
   return { ok: true };
 }
 
@@ -320,13 +417,13 @@ async function autoTrackOnMove(cardId, userId, columnName) {
   const running = await get('SELECT * FROM task_time_entries WHERE card_id=? AND user_id=? AND ended_at IS NULL', cardId, userId);
   if (isTracked) {
     if (running) return; // вже й так іде — не плодимо другий запис
-    await insert('task_time_entries', { card_id: cardId, user_id: userId, started_at: new Date().toISOString() });
-    await logActivity(cardId, userId, 'time_started', { auto: true });
+    const id = await insert('task_time_entries', { card_id: cardId, user_id: userId, started_at: new Date().toISOString() });
+    await logActivity(cardId, userId, 'time_started', { auto: true, entry_id: id });
   } else if (running) {
     const endedAt = new Date();
     const seconds = Math.max(0, Math.round((endedAt.getTime() - new Date(running.started_at).getTime()) / 1000));
     await run('UPDATE task_time_entries SET ended_at=?, seconds=? WHERE id=?', endedAt.toISOString(), seconds, running.id);
-    await logActivity(cardId, userId, 'time_stopped', { seconds, auto: true });
+    await logActivity(cardId, userId, 'time_stopped', { seconds, auto: true, entry_id: running.id });
   }
 }
 
@@ -428,7 +525,7 @@ export async function startTimer(user, cardId) {
   const running = await get('SELECT id FROM task_time_entries WHERE card_id=? AND user_id=? AND ended_at IS NULL', cardId, user.id);
   if (running) return { id: running.id };
   const id = await insert('task_time_entries', { card_id: cardId, user_id: user.id, started_at: new Date().toISOString() });
-  await logActivity(cardId, user.id, 'time_started', null);
+  await logActivity(cardId, user.id, 'time_started', { entry_id: id });
   return { id };
 }
 
@@ -441,20 +538,38 @@ export async function stopTimer(user, cardId) {
   const endedAt = new Date();
   const seconds = Math.max(0, Math.round((endedAt.getTime() - new Date(running.started_at).getTime()) / 1000));
   await run('UPDATE task_time_entries SET ended_at=?, seconds=? WHERE id=?', endedAt.toISOString(), seconds, running.id);
-  await logActivity(cardId, user.id, 'time_stopped', { seconds });
+  await logActivity(cardId, user.id, 'time_stopped', { seconds, entry_id: running.id });
   return { id: running.id, seconds };
 }
 
-export async function editTimeEntry(user, entryId, seconds) {
+// Редагувати можна або «скільки хвилин» (просто рахуємо кінець від
+// незмінного початку), або точні межі «з — до» (тоді й початок, і кінець,
+// і секунди рахуються з цих двох міток) — картка задачі дає обидва
+// варіанти в одній формі.
+export async function editTimeEntry(user, entryId, body) {
   const entry = await get('SELECT * FROM task_time_entries WHERE id=?', entryId);
   if (!entry) throw Object.assign(new Error('Запис не знайдено'), { status: 404 });
   const { board_id: boardId } = await cardRow(entry.card_id);
   const spaceId = await spaceIdOfBoard(boardId);
   await assertMember(user, spaceId);
   if (entry.ended_at == null) throw Object.assign(new Error('Спершу зупиніть таймер'), { status: 409 });
-  const sec = Math.max(0, Math.round(Number(seconds) || 0));
-  const endedAt = new Date(new Date(entry.started_at).getTime() + sec * 1000);
-  await run('UPDATE task_time_entries SET seconds=?, ended_at=? WHERE id=?', sec, endedAt.toISOString(), entryId);
-  await logActivity(entry.card_id, user.id, 'time_edited', { seconds: sec });
+  let startedAt = entry.started_at;
+  let seconds;
+  let endedAt;
+  if (body?.started_at && body?.ended_at) {
+    const start = new Date(body.started_at);
+    endedAt = new Date(body.ended_at);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(endedAt.getTime())) {
+      throw Object.assign(new Error('Некоректний час'), { status: 400 });
+    }
+    seconds = Math.round((endedAt.getTime() - start.getTime()) / 1000);
+    if (seconds < 0) throw Object.assign(new Error('Кінець раніше початку'), { status: 400 });
+    startedAt = start.toISOString();
+  } else {
+    seconds = Math.max(0, Math.round(Number(body?.seconds) || 0));
+    endedAt = new Date(new Date(startedAt).getTime() + seconds * 1000);
+  }
+  await run('UPDATE task_time_entries SET started_at=?, seconds=?, ended_at=? WHERE id=?', startedAt, seconds, endedAt.toISOString(), entryId);
+  await logActivity(entry.card_id, user.id, 'time_edited', { seconds, entry_id: entryId });
   return { ok: true };
 }

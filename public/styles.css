@@ -500,3 +500,44 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 .task-comment-box textarea { border: none; background: transparent; padding: 4px; resize: vertical; }
 .task-comment-box textarea:focus { outline: none; }
 .task-comment-toolbar { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+
+.activity-clickable { cursor: pointer; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; }
+.activity-clickable:hover { background: var(--panel-2); text-decoration: underline; }
+
+/* Аватарка виконавця — кружечок з ініціалами; порожній стан — сіра іконка людини. */
+.task-avatar {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; color: #fff; font-weight: 700; line-height: 1;
+}
+.task-avatar-empty { background: var(--panel-2) !important; color: var(--muted); }
+
+/* Кнопка-пікер (виконавець/пріоритет) — виглядає як поле, відкриває попап. */
+.task-picker-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; border: none; background: transparent;
+  padding: 3px 4px; border-radius: 6px; font: inherit; color: var(--text); cursor: pointer; text-align: left;
+}
+.task-picker-btn:hover, .task-picker-btn:focus { background: var(--panel-2); outline: none; }
+
+/* Спливаюче меню вибору (виконавець/пріоритет/теги) — рендериться в body. */
+.task-popover {
+  position: fixed; z-index: 200; min-width: 220px; max-width: 300px; max-height: 320px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .28); padding: 6px;
+}
+.task-popover-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 6px;
+  cursor: pointer; font-size: 13px;
+}
+.task-popover-item:hover { background: var(--panel-2); }
+
+/* Теги — кольорові чипи в клітинці картки й у чекліст-рядках попапу. */
+.task-tags-value { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 24px; cursor: pointer; padding: 3px 4px; border-radius: 6px; }
+.task-tags-value:hover { background: var(--panel-2); }
+.task-tag-chip {
+  display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; border: 1px solid transparent; white-space: nowrap;
+}
+.task-tag-row { cursor: default; }
+.task-tag-row:hover { background: var(--panel-2); }
+.task-tag-new-row { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-top: 1px solid var(--line); margin-top: 4px; }
+.task-tag-new-row input { flex: 1 1 auto; min-width: 0; }

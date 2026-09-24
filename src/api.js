@@ -1020,6 +1020,24 @@ export async function handleApi(req, res, url) {
       const body = await readBody(req);
       return ok(res, await taskBoards.createCard(user, boardId, body.column_id, body.title));
     }
+    if (seg[2] === 'tags' && req.method === 'GET') return ok(res, { rows: await taskBoards.listTags(user, boardId) });
+    if (seg[2] === 'tags' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'create')) return fail(res, 403, 'Немає прав створювати теги');
+      const body = await readBody(req);
+      return ok(res, await taskBoards.createTag(user, boardId, body.name, body.color));
+    }
+    return fail(res, 405, 'Метод не підтримується');
+  }
+  if (seg[0] === 'task_tags' && seg[1] && !Number.isNaN(Number(seg[1]))) {
+    const tagId = Number(seg[1]);
+    if (req.method === 'PUT') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати теги');
+      return ok(res, await taskBoards.updateTag(user, tagId, await readBody(req)));
+    }
+    if (req.method === 'DELETE') {
+      if (!can(user, 'task_spaces', 'delete')) return fail(res, 403, 'Немає прав видаляти теги');
+      return ok(res, await taskBoards.deleteTag(user, tagId));
+    }
     return fail(res, 405, 'Метод не підтримується');
   }
   if (seg[0] === 'task_columns' && seg[1] && !Number.isNaN(Number(seg[1]))) {
@@ -1072,6 +1090,11 @@ export async function handleApi(req, res, url) {
       if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав вести таймер');
       return ok(res, await taskBoards.stopTimer(user, cardId));
     }
+    if (seg[2] === 'tags' && req.method === 'PUT') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати теги картки');
+      const body = await readBody(req);
+      return ok(res, await taskBoards.setCardTags(user, cardId, body.tag_ids));
+    }
     return fail(res, 405, 'Метод не підтримується');
   }
   if (seg[0] === 'task_comments' && seg[1] && req.method === 'DELETE') {
@@ -1096,8 +1119,7 @@ export async function handleApi(req, res, url) {
   }
   if (seg[0] === 'task_time_entries' && seg[1] && req.method === 'PUT') {
     if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати трекер часу');
-    const body = await readBody(req);
-    return ok(res, await taskBoards.editTimeEntry(user, Number(seg[1]), body.seconds));
+    return ok(res, await taskBoards.editTimeEntry(user, Number(seg[1]), await readBody(req)));
   }
 
   // --- клієнти ---

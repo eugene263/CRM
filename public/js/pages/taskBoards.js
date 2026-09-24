@@ -9,14 +9,30 @@ import { state } from '../app.js';
 import { el, modal, toast, actionButton } from '../ui.js';
 import { icon, withIcon } from '../icons.js';
 
+// Кожен пріоритет — свій колір прапорця (як у ClickUp): від сірого
+// «нема» до червоного «терміново». Той самий колір, що на канві дошки,
+// що в картці.
 const PRIORITIES = [
-  { value: '', label: 'Немає' },
-  { value: 'low', label: 'Низький' },
-  { value: 'medium', label: 'Середній' },
-  { value: 'high', label: 'Високий' },
-  { value: 'urgent', label: 'Терміново' },
+  { value: '', label: 'Немає', color: '#8d95ab' },
+  { value: 'low', label: 'Низький', color: '#748ffc' },
+  { value: 'medium', label: 'Середній', color: '#f2b705' },
+  { value: 'high', label: 'Високий', color: '#e8590c' },
+  { value: 'urgent', label: 'Терміново', color: '#e03131' },
 ];
-const priorityLabel = (v) => PRIORITIES.find((p) => p.value === v)?.label || v || '—';
+const priorityOf = (v) => PRIORITIES.find((p) => p.value === (v || '')) || PRIORITIES[0];
+
+// Кольори тегів — та сама палітра, що вже прижилась у мапах клієнта
+// (ITEM_COLORS): один впізнаваний набір кольорів по всій CRM.
+const TAG_COLORS = [
+  { key: 'accent', hex: '#6c8cff' }, { key: 'yellow', hex: '#f2b705' }, { key: 'pink', hex: '#f06595' },
+  { key: 'green', hex: '#12b886' }, { key: 'orange', hex: '#e8590c' }, { key: 'purple', hex: '#845ef7' },
+];
+const tagColorHex = (key) => (TAG_COLORS.find((c) => c.key === key) || TAG_COLORS[0]).hex;
+
+function tagChip(t) {
+  const hex = tagColorHex(t.color);
+  return el('span', { class: 'task-tag-chip', style: `background:${hex}22;color:${hex};border-color:${hex}` }, t.name);
+}
 
 function formatSeconds(total) {
   const s = Math.max(0, Math.round(total || 0));
@@ -25,8 +41,22 @@ function formatSeconds(total) {
   if (m) return `${m} хв`;
   return `${s} с`;
 }
-const splitTags = (value) => String(value || '').split(',').map((t) => t.trim()).filter(Boolean);
 const fmtDate = (v) => (v ? String(v).slice(0, 16).replace('T', ' ') : '—');
+
+// Аватарка — кружечок з ініціалами й кольором за id людини (фотографій
+// профілю в системі нема, і робити їх заради цього не варто).
+const AVATAR_COLORS = ['#6c8cff', '#f2b705', '#f06595', '#12b886', '#e8590c', '#845ef7', '#20a97f', '#4263eb'];
+function initials(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
+}
+function avatarEl(name, userId, size = 20) {
+  const color = AVATAR_COLORS[Math.abs(Number(userId) || 0) % AVATAR_COLORS.length];
+  return el('span', {
+    class: 'task-avatar', style: `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px;background:${color}`,
+  }, initials(name));
+}
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -35,6 +65,19 @@ function readFileAsDataUrl(file) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+// Спливаюче меню біля кнопки-власника — той самий прийом, що вже є в
+// openColorMenu мап клієнта: рендериться в document.body (не всередині
+// попапа картки, щоб не обрізалось overflow), закривається кліком повз.
+function openPopover(anchor, build) {
+  const rect = anchor.getBoundingClientRect();
+  const box = el('div', { class: 'task-popover', style: `left:${rect.left}px;top:${rect.bottom + 4}px` });
+  build(box, () => box.remove());
+  document.body.append(box);
+  const close = (e) => { if (!box.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) { box.remove(); document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+  return box;
 }
 
 // ── Пікер просторів (#/e/task_spaces) ─────────────────────────────────────
@@ -332,14 +375,18 @@ export async function renderTaskBoard(boardId) {
   }
 
   function renderCard(c) {
+    const p = priorityOf(c.priority);
+    const priorityIcon = c.priority ? icon('flag', 13) : null;
+    if (priorityIcon) priorityIcon.style.color = p.color;
     const card = el('div', { class: 'kanban-card', draggable: 'true', 'data-card-id': c.id, 'data-order': c.board_order },
       el('div', { class: 'kanban-card-title' }, c.title),
       el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:6px' },
-        el('span', { class: 'muted', style: 'font-size:12px' }, c.assignee_name || '—'),
-        c.priority ? el('span', { class: 'badge' }, priorityLabel(c.priority)) : null),
+        c.assignee_name
+          ? el('span', { class: 'with-icon', style: 'font-size:12px' }, avatarEl(c.assignee_name, c.assignee_user_id, 16), c.assignee_name)
+          : el('span', { class: 'muted', style: 'font-size:12px' }, '—'),
+        priorityIcon ? el('span', { title: p.label }, priorityIcon) : null),
       c.due_date ? el('div', { class: 'muted', style: 'font-size:11.5px;margin-top:4px' }, `до ${c.due_date}`) : null,
-      splitTags(c.tags).length ? el('div', { style: 'margin-top:4px;display:flex;gap:4px;flex-wrap:wrap' },
-        ...splitTags(c.tags).map((t) => el('span', { class: 'badge' }, t))) : null);
+      c.tags?.length ? el('div', { style: 'margin-top:4px;display:flex;gap:4px;flex-wrap:wrap' }, ...c.tags.map(tagChip)) : null);
     card.addEventListener('dragstart', () => {
       dragging = { id: c.id }; card.classList.add('dragging'); startAutoScroll();
     });
@@ -357,12 +404,23 @@ export async function renderTaskBoard(boardId) {
 
 // ── Картка задачі: великий попап з полями зліва й Activity/коментарями
 // справа — режим редагування, як на скріні ClickUp. ───────────────────────
+function toLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export async function openTaskCard(cardId, onChange = () => {}) {
   const ent = state.meta.task_spaces;
   const canEdit = !!ent.can.update;
   const canDelete = !!ent.can.delete;
 
-  const bg = el('div', { class: 'drawer-bg', onclick: (e) => { if (e.target === bg) bg.remove(); } });
+  let tickTimer = null;
+  function stopTick() { if (tickTimer) { clearInterval(tickTimer); tickTimer = null; } }
+  function closeModal() { stopTick(); bg.remove(); }
+
+  const bg = el('div', { class: 'drawer-bg', onclick: (e) => { if (e.target === bg) closeModal(); } });
   const box = el('div', { class: 'task-drawer' }, el('div', { class: 'muted', style: 'padding:20px' }, 'Завантаження…'));
   bg.append(box);
   document.body.append(bg);
@@ -382,9 +440,10 @@ export async function openTaskCard(cardId, onChange = () => {}) {
     const who = a.user_name || 'Хтось';
     switch (a.kind) {
       case 'created': return `${who} створив(ла) цю картку`;
-      case 'moved': return `${who} переніс(ла): ${p.from} → ${p.to}`;
+      case 'moved': return `${who} переніс(ла): ${p.from} → ${p.to}${p.auto ? ' (автоматично)' : ''}`;
       case 'assigned': return `${who} призначив(ла): ${p.to}`;
       case 'field_changed': return `${who} змінив(ла) ${p.field}: «${p.from ?? '—'}» → «${p.to ?? '—'}»`;
+      case 'tags_changed': return `${who} змінив(ла) теги`;
       case 'time_started': return `${who} запустив(ла) таймер${p.auto ? ' (автоматично, перенесено в «В роботі»)' : ''}`;
       case 'time_stopped': return `${who} зупинив(ла) таймер: +${formatSeconds(p.seconds)}${p.auto ? ' (автоматично, перенесено з «В роботі»)' : ''}`;
       case 'time_edited': return `${who} відредагував(ла) час: ${formatSeconds(p.seconds)}`;
@@ -399,12 +458,25 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       onDelete ? el('button', { class: 'btn small icon-only danger', onclick: onDelete }, icon('trash', 11)) : null);
   }
 
-  function editTimeEntry(entry) {
-    const input = el('input', { type: 'number', min: '0', value: Math.round((entry.seconds || 0) / 60) });
-    const m = modal('Скільки часу витрачено', el('div', { class: 'field' }, el('label', {}, 'Хвилин'), input),
+  // Редагувати можна або «скільки хвилин» (швидко), або точні межі «з —
+  // до» — якщо заповнено обидва точні поля, вони мають пріоритет.
+  function editTimeEntry(entryId) {
+    const entry = d.timeEntries.find((t) => t.id === entryId);
+    if (!entry) return;
+    const minutesInput = el('input', { type: 'number', min: '0', value: Math.round((entry.seconds || 0) / 60) });
+    const startInput = el('input', { type: 'datetime-local', value: toLocalInput(entry.started_at) });
+    const endInput = el('input', { type: 'datetime-local', value: entry.ended_at ? toLocalInput(entry.ended_at) : '' });
+    const m = modal('Редагувати трекер часу', el('div', {},
+      el('div', { class: 'field' }, el('label', {}, 'Скільки часу (хвилин)'), minutesInput),
+      el('div', { class: 'muted', style: 'margin:10px 0 6px;font-size:12px' }, 'або точний час, з якого по яку годину:'),
+      el('div', { class: 'field' }, el('label', {}, 'З'), startInput),
+      el('div', { class: 'field' }, el('label', {}, 'До'), endInput)),
       [actionButton('Зберегти', async () => {
-        await api.put(`/task_time_entries/${entry.id}`, { seconds: Number(input.value || 0) * 60 });
-        m.remove(); await refresh();
+        const body = (startInput.value && endInput.value)
+          ? { started_at: new Date(startInput.value).toISOString(), ended_at: new Date(endInput.value).toISOString() }
+          : { seconds: Number(minutesInput.value || 0) * 60 };
+        try { await api.put(`/task_time_entries/${entryId}`, body); m.remove(); await refresh(); }
+        catch (e) { toast(e.message, true); }
       })]);
   }
 
@@ -415,9 +487,114 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       el('div', { class: 'task-field-value' }, valueNode));
   }
 
+  // ── Виконавець: кнопка з аватаркою+іменем, спливаюче меню з учасниками ──
+  function buildAssigneeField(card, members) {
+    const btn = el('button', { class: 'task-picker-btn', type: 'button' });
+    const m = members.find((x) => x.user_id === card.assignee_user_id);
+    btn.append(
+      m ? avatarEl(m.name, m.user_id, 20) : el('span', { class: 'task-avatar task-avatar-empty' }, icon('user', 12)),
+      el('span', {}, m ? m.name : 'Не призначено'));
+    btn.addEventListener('click', () => openPopover(btn, (box2) => {
+      box2.append(
+        el('div', { class: 'task-popover-item', onclick: () => { patch({ assignee_user_id: null }); box2.remove(); } },
+          el('span', { class: 'task-avatar task-avatar-empty' }, icon('user', 12)), 'Не призначено'),
+        ...members.map((mm) => el('div', {
+          class: 'task-popover-item', onclick: () => { patch({ assignee_user_id: mm.user_id }); box2.remove(); },
+        }, avatarEl(mm.name, mm.user_id, 18), mm.name)));
+    }));
+    return btn;
+  }
+
+  // ── Пріоритет: кнопка з кольоровим прапорцем, спливаюче меню варіантів ──
+  function buildPriorityField(card) {
+    const btn = el('button', { class: 'task-picker-btn', type: 'button' });
+    const p = priorityOf(card.priority);
+    const ic = icon('flag', 14); ic.style.color = p.color;
+    btn.append(ic, el('span', {}, p.label));
+    btn.addEventListener('click', () => openPopover(btn, (box2) => {
+      box2.append(...PRIORITIES.map((pp) => {
+        const ic2 = icon('flag', 14); ic2.style.color = pp.color;
+        return el('div', { class: 'task-popover-item', onclick: () => { patch({ priority: pp.value || null }); box2.remove(); } }, ic2, pp.label);
+      }));
+    }));
+    return btn;
+  }
+
+  // ── Теги: чипи обраних, спливаючий чекліст усіх тегів дошки + додати/
+  // перефарбувати. Кожен тег належить дошці, а не одній картці — обраний
+  // тут одразу видно всім карткам, куди його потім призначать. ───────────
+  function buildTagsField(cardTags, boardTags, boardId) {
+    const wrap = el('div', { class: 'task-tags-value' });
+    if (!cardTags.length) wrap.append(el('span', { class: 'muted' }, 'Порожньо'));
+    else wrap.append(...cardTags.map(tagChip));
+    wrap.addEventListener('click', () => {
+      const selected = new Set(cardTags.map((t) => t.id));
+      openPopover(wrap, (box2) => {
+        async function apply() {
+          try { await api.put(`/task_cards/${cardId}/tags`, { tag_ids: [...selected] }); await refresh(); }
+          catch (e) { toast(e.message, true); }
+        }
+        function renderList() {
+          box2.textContent = '';
+          box2.append(...boardTags.map((t) => {
+            const checkbox = el('input', {
+              type: 'checkbox', checked: selected.has(t.id) ? true : null,
+              onclick: (e) => { e.stopPropagation(); if (e.target.checked) selected.add(t.id); else selected.delete(t.id); apply(); },
+            });
+            return el('div', { class: 'task-popover-item task-tag-row' },
+              checkbox, tagChip(t), el('div', { style: 'flex:1 1 auto' }),
+              el('button', {
+                class: 'btn small icon-only', title: 'Редагувати тег',
+                onclick: (e) => { e.stopPropagation(); box2.remove(); editTag(t, boardId); },
+              }, icon('edit', 11)));
+          }));
+          const newInput = el('input', { placeholder: 'Новий тег', style: 'font-size:12.5px' });
+          const addNew = async () => {
+            const name = newInput.value.trim();
+            if (!name) return;
+            try {
+              const { id } = await api.post(`/task_boards/${boardId}/tags`, { name, color: 'accent' });
+              boardTags.push({ id, name, color: 'accent' });
+              selected.add(id);
+              newInput.value = '';
+              await apply();
+              renderList();
+            } catch (e) { toast(e.message, true); }
+          };
+          newInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addNew(); });
+          box2.append(el('div', { class: 'task-tag-new-row' }, newInput,
+            el('button', { class: 'btn small icon-only', onclick: addNew }, icon('plus', 12))));
+        }
+        renderList();
+      });
+    });
+    return wrap;
+  }
+
+  function editTag(tag, boardId) {
+    const nameInput = el('input', { value: tag.name });
+    const colorRow = el('div', { style: 'display:flex;gap:8px;margin-top:6px' }, ...TAG_COLORS.map((c) => el('button', {
+      type: 'button', class: `map-color-swatch${tag.color === c.key ? ' active' : ''}`, style: `background:${c.hex};border-color:${c.hex}`,
+      onclick: async () => { tag.color = c.key; await api.put(`/task_tags/${tag.id}`, { color: c.key }); m.remove(); await refresh(); },
+    })));
+    const m = modal('Редагувати тег', el('div', {},
+      el('div', { class: 'field' }, el('label', {}, 'Назва'), nameInput),
+      el('div', { class: 'field' }, el('label', {}, 'Колір'), colorRow)),
+      [actionButton('Зберегти', async () => {
+        try { await api.put(`/task_tags/${tag.id}`, { name: nameInput.value.trim() || tag.name }); m.remove(); await refresh(); }
+        catch (e) { toast(e.message, true); }
+      }),
+      actionButton('Видалити тег', async () => {
+        if (!confirm(`Видалити тег «${tag.name}» з усіх карток?`)) return;
+        try { await api.del(`/task_tags/${tag.id}`); m.remove(); await refresh(); }
+        catch (e) { toast(e.message, true); }
+      }, { className: 'btn danger' })]);
+  }
+
   function render() {
-    const { card, space, board, columns, members, attachments, comments, timeEntries, activity, runningTimer, totalSeconds } = d;
+    const { card, space, board, columns, members, attachments, comments, tags, boardTags, timeEntries, activity, runningTimer, totalSeconds } = d;
     box.textContent = '';
+    stopTick();
 
     // ── Ліва частина: поля задачі — той самий вигляд, що на референсі:
     // рядки з іконкою+назвою зліва, значенням справа, по два поля в рядок. ─
@@ -429,17 +606,26 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       class: 'task-status-select',
       onchange: () => api.post(`/task_cards/${cardId}/move`, { column_id: Number(statusSelect.value) }).then(refresh).then(onChange),
     }, ...columns.map((c) => el('option', { value: c.id, selected: c.id === card.column_id ? true : null }, c.name)));
-    const dueInput = el('input', { type: 'date', value: card.due_date || '', onchange: () => patch({ due_date: dueInput.value || null }) });
-    const assigneeSelect = el('select', { onchange: () => patch({ assignee_user_id: assigneeSelect.value || null }) },
-      el('option', { value: '' }, 'Не призначено'),
-      ...members.map((m) => el('option', { value: m.user_id, selected: m.user_id === card.assignee_user_id ? true : null }, m.name)));
-    const prioritySelect = el('select', { onchange: () => patch({ priority: prioritySelect.value || null }) },
-      ...PRIORITIES.map((p) => el('option', { value: p.value, selected: p.value === (card.priority || '') ? true : null }, p.label)));
-    const tagsInput = el('input', {
-      value: card.tags || '', placeholder: 'Порожньо',
-      onblur: () => tagsInput.value !== (card.tags || '') && patch({ tags: tagsInput.value }),
-    });
 
+    // Дедлайн і дата початку — клік будь-де по полю (не лише по значку
+    // календаря) одразу відкриває вибір дати: showPicker() саме для цього.
+    const startInput = el('input', {
+      type: 'date', value: card.start_date || '', title: 'Дата початку',
+      onclick: (e) => e.target.showPicker?.(), onchange: () => patch({ start_date: startInput.value || null }),
+    });
+    const dueInput = el('input', {
+      type: 'date', value: card.due_date || '', title: 'Дедлайн',
+      onclick: (e) => e.target.showPicker?.(), onchange: () => patch({ due_date: dueInput.value || null }),
+    });
+    const datesCell = el('div', { style: 'display:flex;align-items:center;gap:6px' }, startInput, el('span', { class: 'muted' }, '→'), dueInput);
+
+    const assigneeField = buildAssigneeField(card, members);
+    const priorityField = buildPriorityField(card);
+    const tagsField = buildTagsField(tags, boardTags, board.id);
+
+    // ── Трекер часу: кнопка старт/стоп + живий лічильник секунд, поки йде
+    // (без переліку «Власник Власник…» — усі старти/стопи й так видно в
+    // Activity праворуч, звідти ж їх і редагують). ─────────────────────
     const isRunning = !!runningTimer;
     const timerBtn = el('button', {
       class: `btn small${isRunning ? ' danger' : ' primary'}`,
@@ -448,13 +634,14 @@ export async function openTaskCard(cardId, onChange = () => {}) {
         catch (e) { toast(e.message, true); }
       },
     }, withIcon(isRunning ? 'pause' : 'play', isRunning ? 'Зупинити' : 'Почати'));
-    const myEntries = timeEntries.filter((t) => t.seconds != null);
-    const timerCell = el('div', { class: 'task-timer-cell' },
-      el('div', { style: 'display:flex;align-items:center;gap:8px' }, timerBtn,
-        el('span', { class: 'muted', style: 'font-size:12px' }, formatSeconds(totalSeconds))),
-      myEntries.length ? el('div', { style: 'display:flex;flex-wrap:wrap;gap:4px;margin-top:6px' },
-        ...myEntries.map((t) => el('span', { class: 'badge' }, `${formatSeconds(t.seconds)} · ${t.user_name}`,
-          t.user_id === state.user.id ? el('button', { class: 'btn small icon-only', style: 'margin-left:4px', onclick: () => editTimeEntry(t) }, icon('edit', 10)) : null))) : null);
+    const timeLabel = el('span', { class: 'muted', style: 'font-size:12px' }, formatSeconds(totalSeconds));
+    if (isRunning) {
+      const startedAt = new Date(runningTimer.started_at).getTime();
+      const tick = () => { timeLabel.textContent = formatSeconds(totalSeconds + Math.floor((Date.now() - startedAt) / 1000)); };
+      tick();
+      tickTimer = setInterval(tick, 1000);
+    }
+    const timerCell = el('div', { style: 'display:flex;align-items:center;gap:8px' }, timerBtn, timeLabel);
 
     const descArea = el('textarea', {
       class: 'task-desc', rows: 4, placeholder: 'Додати опис задачі…',
@@ -475,14 +662,14 @@ export async function openTaskCard(cardId, onChange = () => {}) {
         el('div', { class: 'task-drawer-crumb', style: 'flex:1 1 auto' }, [space?.name, board?.name].filter(Boolean).join(' / ')),
         canDelete ? el('button', {
           class: 'btn small icon-only danger', title: 'Видалити картку',
-          onclick: async () => { if (!confirm('Видалити картку?')) return; await api.del(`/task_cards/${cardId}`); bg.remove(); onChange(); },
+          onclick: async () => { if (!confirm('Видалити картку?')) return; await api.del(`/task_cards/${cardId}`); closeModal(); onChange(); },
         }, icon('trash', 14)) : null,
-        el('button', { class: 'btn small icon-only', onclick: () => bg.remove() }, icon('close', 14))),
+        el('button', { class: 'btn small icon-only', onclick: closeModal }, icon('close', 14))),
       titleInput,
       el('div', { class: 'task-field-table' },
-        fieldRow(fieldCell('dot', 'Статус', statusSelect), fieldCell('user', 'Виконавець', assigneeSelect)),
-        fieldRow(fieldCell('calendar', 'Дедлайн', dueInput), fieldCell('flag', 'Пріоритет', prioritySelect)),
-        fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('tag', 'Теги', tagsInput))),
+        fieldRow(fieldCell('dot', 'Статус', statusSelect), fieldCell('user', 'Виконавець', assigneeField)),
+        fieldRow(fieldCell('calendar', 'Дати', datesCell), fieldCell('flag', 'Пріоритет', priorityField)),
+        fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('tag', 'Теги', tagsField))),
       descArea,
       el('div', { class: 'task-attach-list' },
         ...attachments.map((a) => fileChip(a, canDelete ? async () => { await api.del(`/task_attachments/${a.id}`); await refresh(); } : null))),
@@ -490,11 +677,14 @@ export async function openTaskCard(cardId, onChange = () => {}) {
 
     // ── Права частина: Activity + коментарі ────────────────────────────
     const feedItems = [
-      ...activity.map((a) => ({ created_at: a.created_at, node: el('div', { class: 'activity-item' },
-        el('div', { class: 'activity-bullet' }),
-        el('div', { class: 'activity-body' },
-          el('div', {}, activityText(a)),
-          el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(a.created_at)))) })),
+      ...activity.map((a) => {
+        const p = a.payload ? JSON.parse(a.payload) : {};
+        const clickable = (a.kind === 'time_started' || a.kind === 'time_stopped') && p.entry_id;
+        const textNode = el('div', clickable ? { class: 'activity-clickable', title: 'Редагувати запис часу', onclick: () => editTimeEntry(p.entry_id) } : {}, activityText(a));
+        return { created_at: a.created_at, node: el('div', { class: 'activity-item' },
+          el('div', { class: 'activity-bullet' }),
+          el('div', { class: 'activity-body' }, textNode, el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(a.created_at)))) };
+      }),
       ...comments.map((c) => ({ created_at: c.created_at, node: el('div', { class: 'activity-item comment' },
         el('div', { class: 'activity-bullet' }),
         el('div', { class: 'activity-body' },

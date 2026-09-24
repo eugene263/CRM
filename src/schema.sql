@@ -1070,16 +1070,35 @@ CREATE TABLE IF NOT EXISTS task_cards (
   column_id INTEGER NOT NULL REFERENCES task_columns(id),
   title TEXT NOT NULL,
   description TEXT,
+  start_date TEXT,
   due_date TEXT,
   priority TEXT,
   assignee_user_id INTEGER REFERENCES users(id),
-  tags TEXT,
+  tags TEXT, -- застаріле: вільний текст тегів замінили на task_tags/task_card_tags нижче
   board_order REAL NOT NULL DEFAULT 0,
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_task_cards_board ON task_cards(board_id, column_id);
+
+-- Теги — керовані записи «на дошку» (не вільний текст): назва + колір,
+-- обираються зі спадного списку на картці, редагуються/перефарбовуються
+-- в тому самому списку.
+CREATE TABLE IF NOT EXISTS task_tags (
+  id INTEGER PRIMARY KEY,
+  board_id INTEGER NOT NULL REFERENCES task_boards(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT 'accent',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_tags_board ON task_tags(board_id);
+
+CREATE TABLE IF NOT EXISTS task_card_tags (
+  card_id INTEGER NOT NULL REFERENCES task_cards(id) ON DELETE CASCADE,
+  tag_id INTEGER NOT NULL REFERENCES task_tags(id) ON DELETE CASCADE,
+  PRIMARY KEY (card_id, tag_id)
+);
 
 CREATE TABLE IF NOT EXISTS task_comments (
   id INTEGER PRIMARY KEY,

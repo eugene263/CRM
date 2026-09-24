@@ -1936,7 +1936,7 @@ test('редагування картки логує кожну змінену �
   const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
 
   const upd = await call(`/api/task_cards/${card.id}`, {
-    method: 'PUT', body: { title: 'Нова назва', priority: 'high', tags: 'терміново, важливо', description: 'опис' },
+    method: 'PUT', body: { title: 'Нова назва', priority: 'high', description: 'опис' },
   });
   assert.equal(upd.status, 200, JSON.stringify(upd.data));
 
@@ -1944,8 +1944,8 @@ test('редагування картки логує кожну змінену �
   assert.equal(got.data.card.title, 'Нова назва');
   assert.equal(got.data.card.priority, 'high');
   const kinds = got.data.activity.map((a) => a.kind);
-  // created + 4 окремі field_changed (title/priority/tags/description).
-  assert.equal(kinds.filter((k) => k === 'field_changed').length, 4);
+  // created + 3 окремі field_changed (title/priority/опис).
+  assert.equal(kinds.filter((k) => k === 'field_changed').length, 3);
 
   // Повторний PUT з тими самими значеннями нічого не додає в лог.
   await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { title: 'Нова назва' } });
@@ -2100,4 +2100,129 @@ test('якщо таймер уже запущено вручну, повторн
   assert.equal(got.data.timeEntries.length, 1, 'другий запис не завівся — трекер і так уже йшов');
   const startedEvents = got.data.activity.filter((a) => a.kind === 'time_started');
   assert.equal(startedEvents.length, 1, 'друге «запущено» в активність не додалось');
+});
+
+test('теги — керовані записи на дошку: створення, призначення картці, перефарбування, видалення', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+
+  const tagA = await call(`/api/task_boards/${boardId}/tags`, { method: 'POST', body: { name: 'Терміново', color: 'orange' } });
+  assert.equal(tagA.status, 200, JSON.stringify(tagA.data));
+  const tagB = await call(`/api/task_boards/${boardId}/tags`, { method: 'POST', body: { name: 'Важливо', color: 'yellow' } });
+
+  const list = await call(`/api/task_boards/${boardId}/tags`);
+  assert.equal(list.data.rows.length, 2);
+
+  const assign = await call(`/api/task_cards/${card.id}/tags`, { method: 'PUT', body: { tag_ids: [tagA.data.id, tagB.data.id] } });
+  assert.equal(assign.status, 200, JSON.stringify(assign.data));
+
+  const got = await call(`/api/task_cards/${card.id}`);
+  assert.equal(got.data.tags.length, 2);
+  assert.deepEqual(got.data.tags.map((t) => t.name).sort(), ['Важливо', 'Терміново']);
+  assert.equal(got.data.boardTags.length, 2, 'boardTags — весь довідник дошки, не лише призначені');
+  assert.ok(got.data.activity.some((a) => a.kind === 'tags_changed'));
+
+  // Перефарбувати й перейменувати наявний тег.
+  const recolor = await call(`/api/task_tags/${tagA.data.id}`, { method: 'PUT', body: { name: 'Гаряче', color: 'pink' } });
+  assert.equal(recolor.status, 200);
+  const afterRecolor = await call(`/api/task_cards/${card.id}`);
+  const renamed = afterRecolor.data.tags.find((t) => t.id === tagA.data.id);
+  assert.equal(renamed.name, 'Гаряче');
+  assert.equal(renamed.color, 'pink');
+
+  // Зняти один тег — лишається тільки другий.
+  const unassign = await call(`/api/task_cards/${card.id}/tags`, { method: 'PUT', body: { tag_ids: [tagB.data.id] } });
+  assert.equal(unassign.status, 200);
+  const afterUnassign = await call(`/api/task_cards/${card.id}`);
+  assert.equal(afterUnassign.data.tags.length, 1);
+  assert.equal(afterUnassign.data.tags[0].id, tagB.data.id);
+
+  // Видалити тег зовсім — з довідника дошки й з картки він теж зникає
+  // (tagA/«Гаряче» лишається — видаляємо тільки tagB).
+  assert.equal((await call(`/api/task_tags/${tagB.data.id}`, { method: 'DELETE' })).status, 200);
+  const afterDelete = await call(`/api/task_cards/${card.id}`);
+  assert.equal(afterDelete.data.tags.length, 0);
+  assert.deepEqual(afterDelete.data.boardTags.map((t) => t.id), [tagA.data.id]);
+});
+
+test('тег з чужої дошки не можна призначити картці', async () => {
+  const spaceId = await makeSpace();
+  const boardA = await makeBoard(spaceId);
+  const boardB = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardA}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardA}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+  const foreignTag = await call(`/api/task_boards/${boardB}/tags`, { method: 'POST', body: { name: 'Чужий', color: 'accent' } });
+
+  const res = await call(`/api/task_cards/${card.id}/tags`, { method: 'PUT', body: { tag_ids: [foreignTag.data.id] } });
+  assert.equal(res.status, 400, JSON.stringify(res.data));
+});
+
+test('дата початку на картці в беклозі автоматично переносить її в «До виконання»', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const board = await call(`/api/task_boards/${boardId}`);
+  const todo = board.data.columns[0];
+  // Своя колонка-«беклог» перед стандартними трьома.
+  const backlog = await call(`/api/task_boards/${boardId}/columns`, { method: 'POST', body: { name: 'Беклог' } });
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: backlog.data.id, title: 'Задача' } })).data;
+
+  const upd = await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { start_date: '2026-10-01' } });
+  assert.equal(upd.status, 200, JSON.stringify(upd.data));
+
+  const got = await call(`/api/task_cards/${card.id}`);
+  assert.equal(got.data.card.column_id, todo.id, 'картка сама переїхала в «До виконання»');
+  const movedAuto = got.data.activity.find((a) => a.kind === 'moved');
+  assert.ok(movedAuto);
+  assert.ok(JSON.parse(movedAuto.payload).auto);
+});
+
+test('дата початку не чіпає картку, яка вже в «В роботі»/«Готово»', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const [, inProgress] = (await call(`/api/task_boards/${boardId}`)).data.columns;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: inProgress.id, title: 'Задача' } })).data;
+
+  await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { start_date: '2026-10-01' } });
+  const got = await call(`/api/task_cards/${card.id}`);
+  assert.equal(got.data.card.column_id, inProgress.id, 'уже в «В роботі» — авто-перенесення не спрацьовує');
+  assert.ok(!got.data.activity.some((a) => a.kind === 'moved'));
+});
+
+test('редагування запису часу точними межами «з — до» рахує секунди самостійно', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+
+  await call(`/api/task_cards/${card.id}/timer/start`, { method: 'POST' });
+  await call(`/api/task_cards/${card.id}/timer/stop`, { method: 'POST' });
+  const entryId = (await call(`/api/task_cards/${card.id}`)).data.timeEntries[0].id;
+
+  const edited = await call(`/api/task_time_entries/${entryId}`, {
+    method: 'PUT', body: { started_at: '2026-09-24T09:00:00.000Z', ended_at: '2026-09-24T11:30:00.000Z' },
+  });
+  assert.equal(edited.status, 200, JSON.stringify(edited.data));
+
+  const got = await call(`/api/task_cards/${card.id}`);
+  assert.equal(got.data.timeEntries[0].seconds, 2.5 * 3600);
+  assert.equal(got.data.totalSeconds, 2.5 * 3600);
+  const editedEvent = got.data.activity.find((a) => a.kind === 'time_edited');
+  assert.equal(JSON.parse(editedEvent.payload).entry_id, entryId);
+});
+
+test('кінець раніше початку в редагуванні запису часу відхиляється', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+  await call(`/api/task_cards/${card.id}/timer/start`, { method: 'POST' });
+  await call(`/api/task_cards/${card.id}/timer/stop`, { method: 'POST' });
+  const entryId = (await call(`/api/task_cards/${card.id}`)).data.timeEntries[0].id;
+
+  const res = await call(`/api/task_time_entries/${entryId}`, {
+    method: 'PUT', body: { started_at: '2026-09-24T11:00:00.000Z', ended_at: '2026-09-24T09:00:00.000Z' },
+  });
+  assert.equal(res.status, 400);
 });

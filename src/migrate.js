@@ -171,6 +171,15 @@ const migrations = [
       if (!accountCols.has('niche')) await run('ALTER TABLE accounts ADD COLUMN niche TEXT');
     },
   },
+  {
+    // Дата початку — окремо від дедлайну; task_tags/task_card_tags — нові
+    // таблиці, їх ставить сам schema.sql (CREATE TABLE IF NOT EXISTS).
+    id: '2026-09-24-task-cards-start-date',
+    async up() {
+      const cols = await columnsOf('task_cards');
+      if (!cols.has('start_date')) await run('ALTER TABLE task_cards ADD COLUMN start_date TEXT');
+    },
+  },
 ];
 
 export async function migrate() {
