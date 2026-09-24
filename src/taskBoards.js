@@ -225,6 +225,8 @@ export async function getCard(user, cardId) {
   const { board_id: boardId } = await cardRow(cardId);
   const spaceId = await spaceIdOfBoard(boardId);
   await assertMember(user, spaceId);
+  const board = await get('SELECT id, name FROM task_boards WHERE id=?', boardId);
+  const space = await get('SELECT id, name FROM task_spaces WHERE id=?', spaceId);
   const card = await get(
     `SELECT c.*, u.name AS assignee_name, cu.name AS creator_name, col.name AS column_name
      FROM task_cards c
@@ -268,7 +270,7 @@ export async function getCard(user, cardId) {
     else cardAttachments.push(a);
   }
   return {
-    card, columns, members, attachments: cardAttachments,
+    card, space, board, columns, members, attachments: cardAttachments,
     comments: comments.map((c) => ({ ...c, attachments: byComment.get(c.id) || [] })),
     timeEntries, activity, runningTimer: running || null,
     totalSeconds: timeEntries.reduce((s, t) => s + (t.seconds || 0), 0),

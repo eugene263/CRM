@@ -408,17 +408,27 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       })]);
   }
 
+  function fieldRow(...cells) { return el('div', { class: 'task-field-row' }, ...cells); }
+  function fieldCell(iconName, label, valueNode) {
+    return el('div', { class: 'task-field-cell' },
+      el('div', { class: 'task-field-label' }, icon(iconName, 14), label),
+      el('div', { class: 'task-field-value' }, valueNode));
+  }
+
   function render() {
-    const { card, columns, members, attachments, comments, timeEntries, activity, runningTimer, totalSeconds } = d;
+    const { card, space, board, columns, members, attachments, comments, timeEntries, activity, runningTimer, totalSeconds } = d;
     box.textContent = '';
 
-    // ── Ліва частина: поля задачі ──────────────────────────────────────
+    // ── Ліва частина: поля задачі — той самий вигляд, що на референсі:
+    // рядки з іконкою+назвою зліва, значенням справа, по два поля в рядок. ─
     const titleInput = el('input', {
-      value: card.title, style: 'font-size:19px;font-weight:700;border:none;background:transparent;padding:2px 0',
+      class: 'task-title', value: card.title,
       onblur: () => titleInput.value.trim() && titleInput.value.trim() !== card.title && patch({ title: titleInput.value.trim() }),
     });
-    const statusSelect = el('select', { onchange: () => api.post(`/task_cards/${cardId}/move`, { column_id: Number(statusSelect.value) }).then(refresh).then(onChange) },
-      ...columns.map((c) => el('option', { value: c.id, selected: c.id === card.column_id ? true : null }, c.name)));
+    const statusSelect = el('select', {
+      class: 'task-status-select',
+      onchange: () => api.post(`/task_cards/${cardId}/move`, { column_id: Number(statusSelect.value) }).then(refresh).then(onChange),
+    }, ...columns.map((c) => el('option', { value: c.id, selected: c.id === card.column_id ? true : null }, c.name)));
     const dueInput = el('input', { type: 'date', value: card.due_date || '', onchange: () => patch({ due_date: dueInput.value || null }) });
     const assigneeSelect = el('select', { onchange: () => patch({ assignee_user_id: assigneeSelect.value || null }) },
       el('option', { value: '' }, 'Не призначено'),
@@ -426,7 +436,7 @@ export async function openTaskCard(cardId, onChange = () => {}) {
     const prioritySelect = el('select', { onchange: () => patch({ priority: prioritySelect.value || null }) },
       ...PRIORITIES.map((p) => el('option', { value: p.value, selected: p.value === (card.priority || '') ? true : null }, p.label)));
     const tagsInput = el('input', {
-      value: card.tags || '', placeholder: 'через кому',
+      value: card.tags || '', placeholder: 'Порожньо',
       onblur: () => tagsInput.value !== (card.tags || '') && patch({ tags: tagsInput.value }),
     });
 
@@ -439,9 +449,15 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       },
     }, withIcon(isRunning ? 'pause' : 'play', isRunning ? 'Зупинити' : 'Почати'));
     const myEntries = timeEntries.filter((t) => t.seconds != null);
+    const timerCell = el('div', { class: 'task-timer-cell' },
+      el('div', { style: 'display:flex;align-items:center;gap:8px' }, timerBtn,
+        el('span', { class: 'muted', style: 'font-size:12px' }, formatSeconds(totalSeconds))),
+      myEntries.length ? el('div', { style: 'display:flex;flex-wrap:wrap;gap:4px;margin-top:6px' },
+        ...myEntries.map((t) => el('span', { class: 'badge' }, `${formatSeconds(t.seconds)} · ${t.user_name}`,
+          t.user_id === state.user.id ? el('button', { class: 'btn small icon-only', style: 'margin-left:4px', onclick: () => editTimeEntry(t) }, icon('edit', 10)) : null))) : null);
 
     const descArea = el('textarea', {
-      rows: 5, placeholder: 'Опис задачі…',
+      class: 'task-desc', rows: 4, placeholder: 'Додати опис задачі…',
       onblur: () => descArea.value !== (card.description || '') && patch({ description: descArea.value }),
     }, card.description || '');
 
@@ -456,39 +472,35 @@ export async function openTaskCard(cardId, onChange = () => {}) {
 
     const main = el('div', { class: 'task-drawer-main' },
       el('div', { class: 'row', style: 'align-items:center;gap:8px' },
-        el('div', { style: 'flex:1 1 auto' }, titleInput),
+        el('div', { class: 'task-drawer-crumb', style: 'flex:1 1 auto' }, [space?.name, board?.name].filter(Boolean).join(' / ')),
         canDelete ? el('button', {
           class: 'btn small icon-only danger', title: 'Видалити картку',
           onclick: async () => { if (!confirm('Видалити картку?')) return; await api.del(`/task_cards/${cardId}`); bg.remove(); onChange(); },
         }, icon('trash', 14)) : null,
         el('button', { class: 'btn small icon-only', onclick: () => bg.remove() }, icon('close', 14))),
-      el('div', { class: 'task-field-grid' },
-        el('div', { class: 'field' }, el('label', {}, 'Статус'), statusSelect),
-        el('div', { class: 'field' }, el('label', {}, 'Дедлайн'), dueInput),
-        el('div', { class: 'field' }, el('label', {}, 'Виконавець'), assigneeSelect),
-        el('div', { class: 'field' }, el('label', {}, 'Пріоритет'), prioritySelect),
-        el('div', { class: 'field', style: 'grid-column:1/-1' }, el('label', {}, 'Теги'), tagsInput),
-        el('div', { class: 'field', style: 'grid-column:1/-1' }, el('label', {}, `Трекер часу — всього ${formatSeconds(totalSeconds)}`),
-          el('div', { class: 'row', style: 'align-items:center;gap:8px' }, timerBtn,
-            ...myEntries.map((t) => el('span', { class: 'badge' }, `${formatSeconds(t.seconds)} · ${t.user_name}`,
-              t.user_id === state.user.id ? el('button', { class: 'btn small icon-only', style: 'margin-left:4px', onclick: () => editTimeEntry(t) }, icon('edit', 10)) : null)))),
-      ),
-      el('div', { class: 'field' }, el('label', {}, 'Опис'), descArea),
-      el('div', { class: 'field' },
-        el('label', {}, 'Файли'),
-        el('div', { style: 'display:flex;flex-direction:column;gap:4px;margin-bottom:6px' },
-          ...attachments.map((a) => fileChip(a, canDelete ? async () => { await api.del(`/task_attachments/${a.id}`); await refresh(); } : null))),
-        el('button', { class: 'btn small', onclick: () => fileInput.click() }, withIcon('paperclip', 'Прикріпити файл')), fileInput));
+      titleInput,
+      el('div', { class: 'task-field-table' },
+        fieldRow(fieldCell('dot', 'Статус', statusSelect), fieldCell('user', 'Виконавець', assigneeSelect)),
+        fieldRow(fieldCell('calendar', 'Дедлайн', dueInput), fieldCell('flag', 'Пріоритет', prioritySelect)),
+        fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('tag', 'Теги', tagsInput))),
+      descArea,
+      el('div', { class: 'task-attach-list' },
+        ...attachments.map((a) => fileChip(a, canDelete ? async () => { await api.del(`/task_attachments/${a.id}`); await refresh(); } : null))),
+      el('button', { class: 'task-quick-row', onclick: () => fileInput.click() }, icon('paperclip', 14), 'Прикріпити файл'), fileInput);
 
     // ── Права частина: Activity + коментарі ────────────────────────────
     const feedItems = [
-      ...activity.map((a) => ({ type: 'activity', created_at: a.created_at, node: el('div', { class: 'activity-item' },
-        el('div', { style: 'font-size:12.5px' }, activityText(a)),
-        el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(a.created_at))) })),
-      ...comments.map((c) => ({ type: 'comment', created_at: c.created_at, node: el('div', { class: 'activity-item comment' },
-        el('div', { style: 'font-size:12.5px' }, el('b', {}, c.user_name || 'Хтось'), ': ', c.body),
-        c.attachments.length ? el('div', { style: 'margin-top:4px;display:flex;flex-direction:column;gap:2px' }, ...c.attachments.map((a) => fileChip(a))) : null,
-        el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(c.created_at))) })),
+      ...activity.map((a) => ({ created_at: a.created_at, node: el('div', { class: 'activity-item' },
+        el('div', { class: 'activity-bullet' }),
+        el('div', { class: 'activity-body' },
+          el('div', {}, activityText(a)),
+          el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(a.created_at)))) })),
+      ...comments.map((c) => ({ created_at: c.created_at, node: el('div', { class: 'activity-item comment' },
+        el('div', { class: 'activity-bullet' }),
+        el('div', { class: 'activity-body' },
+          el('div', {}, el('b', {}, c.user_name || 'Хтось'), ': ', c.body),
+          c.attachments.length ? el('div', { style: 'margin-top:4px;display:flex;flex-direction:column;gap:2px' }, ...c.attachments.map((a) => fileChip(a))) : null,
+          el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(c.created_at)))) })),
     ].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 
     const feed = el('div', { class: 'activity-feed' }, ...feedItems.map((it) => it.node));
@@ -512,11 +524,11 @@ export async function openTaskCard(cardId, onChange = () => {}) {
     };
 
     const side = el('div', { class: 'task-drawer-side' },
-      el('div', { style: 'font-weight:600;margin-bottom:8px' }, 'Activity'),
+      el('div', { class: 'task-drawer-side-head' }, 'Activity'),
       feed,
       el('div', { class: 'task-comment-box' },
         commentInput,
-        el('div', { class: 'row', style: 'align-items:center;gap:6px;margin-top:6px' },
+        el('div', { class: 'task-comment-toolbar' },
           el('button', { class: 'btn small icon-only', title: 'Прикріпити файл', onclick: () => commentFile.click() }, icon('paperclip', 13)),
           commentFile,
           el('div', { style: 'flex:1 1 auto' }),
