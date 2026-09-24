@@ -983,6 +983,7 @@ export async function handleApi(req, res, url) {
     if (!can(user, 'task_spaces', 'read')) return fail(res, 403, 'Немає доступу до задач');
     const spaceId = Number(seg[1]);
     if (!seg[2] && req.method === 'GET') return ok(res, await taskBoards.getSpace(user, spaceId));
+    if (seg[2] === 'analytics' && req.method === 'GET') return ok(res, await taskBoards.getSpaceAnalytics(user, spaceId));
     if (!seg[2] && req.method === 'PUT') {
       if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати простір');
       const body = await readBody(req, taskBoards.MAX_FILE_BYTES);

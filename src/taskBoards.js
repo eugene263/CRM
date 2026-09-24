@@ -143,6 +143,58 @@ export async function getSpace(user, spaceId) {
   return { space, members, boards };
 }
 
+// Дашборд простору — аналітика по ВСІХ картках усіх дошок цього простору
+// разом (не по одній дошці): скільки задач без виконавця, розподіл по
+// виконавцях і по пріоритету, і скільки прострочено (є дедлайн у минулому,
+// картка не в колонці «Готово» — та сама назва-константа, що й де-інде
+// орієнтується на назви колонок, а не на окремий статус-флаг).
+export async function getSpaceAnalytics(user, spaceId) {
+  await assertMember(user, spaceId);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const total = await get(
+    'SELECT COUNT(*) AS c FROM task_cards c JOIN task_boards b ON b.id=c.board_id WHERE b.space_id=?', spaceId,
+  );
+  const unassigned = await get(
+    'SELECT COUNT(*) AS c FROM task_cards c JOIN task_boards b ON b.id=c.board_id WHERE b.space_id=? AND c.assignee_user_id IS NULL',
+    spaceId,
+  );
+  // Фільтр за назвою колонки («не в Готово») — звіряємо в JS, а не через
+  // SQL LOWER(): вбудований LOWER() у SQLite опрацьовує лише ASCII й
+  // мовчки НЕ переводить кирилицю в нижній регістр (той самий підводний
+  // камінь, що й у autoMoveOnStartDate вище).
+  const overdueCandidates = await all(
+    `SELECT col.name AS column_name FROM task_cards c
+     JOIN task_boards b ON b.id=c.board_id JOIN task_columns col ON col.id=c.column_id
+     WHERE b.space_id=? AND c.due_date IS NOT NULL AND c.due_date<>'' AND c.due_date<?`,
+    spaceId, today,
+  );
+  const overdueCount = overdueCandidates.filter((r) => String(r.column_name || '').trim().toLowerCase() !== 'готово').length;
+  const byAssignee = await all(
+    `SELECT u.id AS user_id, u.name, COUNT(*) AS count
+     FROM task_cards c JOIN task_boards b ON b.id=c.board_id JOIN users u ON u.id=c.assignee_user_id
+     WHERE b.space_id=? GROUP BY u.id, u.name ORDER BY count DESC, u.name`,
+    spaceId,
+  );
+  const priorityRows = await all(
+    `SELECT COALESCE(NULLIF(c.priority,''), '') AS priority, COUNT(*) AS count
+     FROM task_cards c JOIN task_boards b ON b.id=c.board_id WHERE b.space_id=? GROUP BY priority`,
+    spaceId,
+  );
+  const byPriority = ['', 'low', 'medium', 'high', 'urgent'].map((value) => ({
+    priority: value,
+    count: Number(priorityRows.find((r) => r.priority === value)?.count || 0),
+  }));
+
+  return {
+    total_tasks: Number(total?.c || 0),
+    unassigned_tasks: Number(unassigned?.c || 0),
+    overdue_tasks: overdueCount,
+    by_assignee: byAssignee.map((r) => ({ user_id: r.user_id, name: r.name, count: Number(r.count) })),
+    by_priority: byPriority,
+  };
+}
+
 export async function addMember(user, spaceId, userId) {
   await assertMember(user, spaceId);
   const u = await get('SELECT id, name FROM users WHERE id=?', Number(userId));

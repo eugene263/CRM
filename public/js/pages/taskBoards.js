@@ -6,7 +6,7 @@
 // праворуч — коментарі й повна історія дій (Activity), як у ClickUp.
 import { api } from '../api.js';
 import { state } from '../app.js';
-import { el, modal, toast, actionButton } from '../ui.js';
+import { el, modal, toast, actionButton, barList, num } from '../ui.js';
 import { icon, withIcon } from '../icons.js';
 
 // Кожен пріоритет — свій колір прапорця (як у ClickUp): від сірого
@@ -922,9 +922,13 @@ export async function renderTaskSpace(spaceId) {
   const canDelete = !!ent.can.delete;
 
   const page = el('div', {});
-  let data;
-  try { data = await api.get(`/task_spaces/${spaceId}`); }
-  catch (e) {
+  let data, analytics;
+  try {
+    [data, analytics] = await Promise.all([
+      api.get(`/task_spaces/${spaceId}`),
+      api.get(`/task_spaces/${spaceId}/analytics`),
+    ]);
+  } catch (e) {
     page.append(el('div', { class: 'card' }, el('div', { class: 'error' }, e.message)));
     return page;
   }
@@ -932,8 +936,9 @@ export async function renderTaskSpace(spaceId) {
   const memberIds = new Set(members.map((m) => m.user_id));
 
   const head = el('div', {});
+  const dashboard = el('div', {});
   const body = el('div', { class: 'row', style: 'align-items:flex-start;margin-top:14px' });
-  page.append(head, body);
+  page.append(head, dashboard, body);
 
   function renderHead() {
     head.textContent = '';
@@ -963,6 +968,40 @@ export async function renderTaskSpace(spaceId) {
           catch (e) { toast(e.message, true); }
         },
       }, icon('trash', 14)) : null));
+  }
+
+  // Дашборд простору — аналітика по ВСІХ картках усіх дошок разом (не по
+  // одній дошці): скільки всього, без виконавця, прострочено, і два
+  // порівняння величин (виконавці/пріоритет) — bar, а не пиріг: точніше
+  // читається на око, ніж кути секторів, і той самий компонент (barList),
+  // що вже показує «Топ креативів»/«Топ крієйторів» на головному дашборді.
+  function renderDashboardWidgets() {
+    const tile = (label, value) => el('div', { class: 'tile' },
+      el('div', { class: 'label' }, label), el('div', { class: 'value' }, num(analytics[value])));
+    const assigneeRows = analytics.by_assignee.map((r) => ({ label: r.name, count: r.count }));
+    const priorityRows = analytics.by_priority.map((r) => ({ ...priorityOf(r.priority), count: r.count }));
+    const maxPriority = Math.max(1, ...priorityRows.map((r) => r.count));
+
+    const priorityRow = (r) => {
+      const dot = el('span', { style: `width:8px;height:8px;border-radius:50%;background:${r.color};display:inline-block;flex:0 0 auto` });
+      const head = el('div', { style: 'display:flex;justify-content:space-between;font-size:13px' },
+        el('span', { class: 'with-icon' }, dot, r.label), el('span', { class: 'muted' }, num(r.count)));
+      const fill = el('div', { style: `width:${(r.count / maxPriority) * 100}%;height:100%;border-radius:4px;background:${r.color}` });
+      return el('div', { style: 'margin-bottom:8px' }, head, el('div', { class: 'bar-track' }, fill));
+    };
+
+    const assigneeCard = el('div', { class: 'card' }, el('h3', {}, 'Задачі по виконавцях'),
+      assigneeRows.length
+        ? barList(assigneeRows, { labelKey: 'label', valueKey: 'count', format: num })
+        : el('div', { class: 'muted' }, 'Ще немає призначених задач'));
+    const priorityCard = el('div', { class: 'card' }, el('h3', {}, 'Розподіл за пріоритетом'),
+      el('div', {}, ...priorityRows.map(priorityRow)));
+
+    return el('div', { style: 'margin-bottom:4px' },
+      el('div', { class: 'tiles' },
+        tile('Усього задач', 'total_tasks'), tile('Без виконавця', 'unassigned_tasks'), tile('Прострочено', 'overdue_tasks')),
+      el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:16px' },
+        assigneeCard, priorityCard));
   }
 
   function renderMembers() {
@@ -1023,6 +1062,7 @@ export async function renderTaskSpace(spaceId) {
   }
 
   renderHead();
+  dashboard.append(renderDashboardWidgets());
   body.append(renderMembers(), renderBoards());
   return page;
 }
@@ -2027,8 +2067,6 @@ export async function renderTaskBoard(boardId) {
       }, icon(isOpen ? 'chevronDown' : 'chevronRight', 12), logoBtn, el('span', { class: 'task-sidebar-space-name' }, s.name), accessBtn);
       list.append(spaceRow);
       if (!isOpen) return;
-      s.members?.length ? list.append(el('div', { class: 'task-sidebar-members' },
-        ...s.members.slice(0, 6).map((m) => avatarEl(m.name, m.user_id, 18)))) : null;
       s.boards.forEach((b) => {
         const iconBtn = el('button', {
           class: 'task-sidebar-board-icon', type: 'button', title: canEdit ? 'Змінити іконку дошки' : b.name,

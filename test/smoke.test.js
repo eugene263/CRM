@@ -2480,3 +2480,36 @@ test('коментарі можна закріпити — кілька одра
   got = (await call(`/api/task_cards/${card.id}`)).data;
   assert.deepEqual(got.comments.filter((c) => c.pinned).map((c) => c.id), [c3.id]);
 });
+
+test('аналітика простору — рахує по ВСІХ дошках разом: без виконавця, по виконавцях, по пріоритету, прострочені', async () => {
+  const spaceId = await makeSpace();
+  const board1 = await makeBoard(spaceId, 'Дошка 1');
+  const board2 = await makeBoard(spaceId, 'Дошка 2');
+  const col1 = (await call(`/api/task_boards/${board1}`)).data.columns[0].id;
+  const board2Cols = (await call(`/api/task_boards/${board2}`)).data.columns;
+  const col2 = board2Cols[0].id;
+  const doneCol2 = board2Cols.find((c) => c.name === 'Готово').id;
+  const userId = (await call('/api/refs')).data.users.find((u) => u.label.includes('Ліза')).id;
+
+  // Дошка 1: без виконавця + urgent (прострочена).
+  await call(`/api/task_boards/${board1}/cards`, {
+    method: 'POST', body: { column_id: col1, title: 'Без виконавця', priority: 'urgent', due_date: '2000-01-01' },
+  });
+  // Дошка 2: з виконавцем, high, теж прострочена, але в «Готово» — не рахується як overdue.
+  await call(`/api/task_boards/${board2}/cards`, {
+    method: 'POST', body: { column_id: doneCol2, title: 'Готова прострочена', priority: 'high', due_date: '2000-01-01', assignee_user_id: userId },
+  });
+  // Дошка 2: з виконавцем, без пріоритету, без дедлайну.
+  await call(`/api/task_boards/${board2}/cards`, {
+    method: 'POST', body: { column_id: col2, title: 'Звичайна', assignee_user_id: userId },
+  });
+
+  const res = await call(`/api/task_spaces/${spaceId}/analytics`);
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  assert.equal(res.data.total_tasks, 3);
+  assert.equal(res.data.unassigned_tasks, 1);
+  assert.equal(res.data.overdue_tasks, 1, 'прострочена, але в «Готово» — не враховується');
+  assert.deepEqual(res.data.by_assignee, [{ user_id: userId, name: 'Крієйтор Ліза', count: 2 }]);
+  const byPriority = Object.fromEntries(res.data.by_priority.map((r) => [r.priority || 'none', r.count]));
+  assert.deepEqual(byPriority, { none: 1, low: 0, medium: 0, high: 1, urgent: 1 });
+});
