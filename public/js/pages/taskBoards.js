@@ -41,6 +41,14 @@ function formatSeconds(total) {
   if (m) return `${m} хв`;
   return `${s} с`;
 }
+// HH:MM:SS — компактний формат для попапу редагування трекера часу (як на
+// референсі), на відміну від «X год Y хв» словами скрізь інде.
+function formatHMS(total) {
+  const s = Math.max(0, Math.round(total || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(h)}:${pad(m)}:${pad(sec)}`;
+}
 const fmtDate = (v) => (v ? String(v).slice(0, 16).replace('T', ' ') : '—');
 
 // Аватарка — кружечок з ініціалами й кольором за id людини (фотографій
@@ -101,6 +109,19 @@ function openPopover(anchor, build) {
 
 let uidCounter = 0;
 const uid = () => `u${Date.now().toString(36)}${(uidCounter += 1)}`;
+
+// Рядок попапу з чекбоксом — клікабельна ВСЯ плашка (не тільки сам
+// квадратик чекбокса): клік будь-де в рядку перемикає чекбокс і викликає
+// onToggle(checked). Клік по самому чекбоксу теж працює природно (не
+// подвоюємо перемикання — беремо вже оновлений e.target.checked).
+function checkboxRow(checked, onToggle, ...content) {
+  const cb = el('input', { type: 'checkbox', checked: checked ? true : null });
+  const apply = () => onToggle(cb.checked);
+  cb.addEventListener('click', (e) => { e.stopPropagation(); apply(); });
+  return el('div', {
+    class: 'task-popover-item', onclick: (e) => { if (e.target === cb) return; cb.checked = !cb.checked; apply(); },
+  }, cb, ...content);
+}
 
 // ── Спільні пікери полів — використовуються і в компактному вигляді на
 // плашці картки в канбані, і в повній картці. onSet(patchFields) сам
@@ -223,16 +244,17 @@ function buildTagsField(cardTags, boardTags, boardId, applyIds, afterTagsChanged
       function renderList() {
         box2.textContent = '';
         box2.append(...boardTags.map((t) => {
-          const checkbox = el('input', {
-            type: 'checkbox', checked: selected.has(t.id) ? true : null,
-            onclick: (ev) => { ev.stopPropagation(); if (ev.target.checked) selected.add(t.id); else selected.delete(t.id); apply(); },
-          });
-          return el('div', { class: 'task-popover-item task-tag-row' },
-            checkbox, tagChip(t), el('div', { style: 'flex:1 1 auto' }),
-            el('button', {
-              class: 'btn small icon-only', title: 'Редагувати тег',
-              onclick: (ev) => { ev.stopPropagation(); box2.remove(); editTagModal(t, boardId, afterTagsChanged); },
-            }, icon('edit', 11)));
+          const checkbox = el('input', { type: 'checkbox', checked: selected.has(t.id) ? true : null });
+          const editBtn = el('button', {
+            class: 'btn small icon-only', title: 'Редагувати тег',
+            onclick: (ev) => { ev.stopPropagation(); box2.remove(); editTagModal(t, boardId, afterTagsChanged); },
+          }, icon('edit', 11));
+          const toggle = () => { if (checkbox.checked) selected.add(t.id); else selected.delete(t.id); apply(); };
+          checkbox.addEventListener('click', (ev) => { ev.stopPropagation(); toggle(); });
+          return el('div', {
+            class: 'task-popover-item task-tag-row',
+            onclick: (ev) => { if (ev.target === checkbox || editBtn.contains(ev.target)) return; checkbox.checked = !checkbox.checked; toggle(); },
+          }, checkbox, tagChip(t), el('div', { style: 'flex:1 1 auto' }), editBtn);
         }));
         // Колір нового тегу обирається одразу тут, до створення — не
         // доводиться потім окремо відкривати редагування, щоб перефарбувати.
@@ -433,19 +455,37 @@ function renderChecklist(b, scheduleSave) {
   return list;
 }
 
+// A, B, C … Z, AA, AB … — літери колонок (як в Excel/Google Таблицях).
+function colLetter(i) {
+  let n = i; let s = '';
+  do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+  return s;
+}
+
 // Таблиця — без кнопок «+ рядок/стовпець»: наведення на клітинку показує
 // маленькі приглушені хендли по кутах (верх-право = додати колонку
 // праворуч, з підсвіткою колонки; верх-ліво ПЕРШОЇ колонки = додати рядок
 // вище, з підсвіткою рядка, а для решти колонок той самий кут — видалити
-// колонку; низ-ліво першої колонки = видалити рядок).
+// колонку; низ-ліво першої колонки = видалити рядок). Наведення на всю
+// таблицю показує зверху літери колонок і зліва номери рядків (Excel-
+// стиль) — перетягуючи за літеру/номер, можна переставити колонку/рядок
+// у будь-яке місце.
 function renderTable(b, scheduleSave) {
   if (!b.rows?.length) b.rows = [['', ''], ['', '']];
   const wrapTable = el('div', { class: 'desc-table-wrap' });
+  let draggingCol = null;
+  let draggingRow = null;
+  function moveArrItem(arr, from, to) { const [item] = arr.splice(from, 1); arr.splice(to, 0, item); }
+  function moveColumn(from, to) { if (from === to) return; b.rows.forEach((row) => moveArrItem(row, from, to)); renderGrid(); scheduleSave(); }
+  function moveRow(from, to) { if (from === to) return; moveArrItem(b.rows, from, to); renderGrid(); scheduleSave(); }
   function renderGrid() {
     wrapTable.textContent = '';
     const table = el('table', { class: 'desc-table' });
-    function highlightCol(ci, cls) { [...table.rows].forEach((tr) => tr.children[ci]?.classList.add(cls)); }
-    function highlightRow(ri, cls) { [...(table.rows[ri]?.children || [])].forEach((td) => td.classList.add(cls)); }
+    // table.rows[0] — рядок з літерами колонок, дані починаються з [1]; у
+    // кожному рядку даних child[0] — клітинка з номером рядка, реальні
+    // стовпці — з індексу 1. Обидва зсуви враховані нижче.
+    function highlightCol(ci, cls) { [...table.rows].slice(1).forEach((tr) => tr.children[ci + 1]?.classList.add(cls)); }
+    function highlightRow(ri, cls) { [...(table.rows[ri + 1]?.children || [])].forEach((td) => td.classList.add(cls)); }
     function clearHighlight() { table.querySelectorAll('td').forEach((td) => td.classList.remove('col-add-hl', 'col-del-hl', 'row-add-hl', 'row-del-hl')); }
     function handle(kind, corner, onEnter, onClick, title) {
       const btn = el('button', { type: 'button', class: `desc-table-handle ${kind} ${corner}`, title }, icon(kind === 'add' ? 'plus' : 'minus', 9));
@@ -454,8 +494,26 @@ function renderTable(b, scheduleSave) {
       btn.addEventListener('click', (e) => { e.stopPropagation(); onClick(); renderGrid(); scheduleSave(); });
       return btn;
     }
+
+    const letterRow = el('tr', { class: 'desc-table-letters-row' }, el('td', { class: 'desc-table-corner' }));
+    b.rows[0].forEach((_, ci) => {
+      const cell = el('td', { class: 'desc-table-letter', draggable: 'true', title: 'Перетягніть, щоб перемістити колонку' }, colLetter(ci));
+      cell.addEventListener('dragstart', (e) => { draggingCol = ci; e.dataTransfer.effectAllowed = 'move'; });
+      cell.addEventListener('dragover', (e) => { e.preventDefault(); cell.classList.add('drag-over'); });
+      cell.addEventListener('dragleave', () => cell.classList.remove('drag-over'));
+      cell.addEventListener('drop', (e) => { e.preventDefault(); cell.classList.remove('drag-over'); if (draggingCol != null) moveColumn(draggingCol, ci); draggingCol = null; });
+      letterRow.append(cell);
+    });
+    table.append(letterRow);
+
     b.rows.forEach((row, ri) => {
       const tr = el('tr', {});
+      const numCell = el('td', { class: 'desc-table-num', draggable: 'true', title: 'Перетягніть, щоб перемістити рядок' }, String(ri + 1));
+      numCell.addEventListener('dragstart', (e) => { draggingRow = ri; e.dataTransfer.effectAllowed = 'move'; });
+      numCell.addEventListener('dragover', (e) => { e.preventDefault(); numCell.classList.add('drag-over'); });
+      numCell.addEventListener('dragleave', () => numCell.classList.remove('drag-over'));
+      numCell.addEventListener('drop', (e) => { e.preventDefault(); numCell.classList.remove('drag-over'); if (draggingRow != null) moveRow(draggingRow, ri); draggingRow = null; });
+      tr.append(numCell);
       row.forEach((cell, ci) => {
         const input = el('input', { value: cell, oninput: (e) => { row[ci] = e.target.value; scheduleSave(); } });
         const td = el('td', {}, input,
@@ -503,16 +561,36 @@ function renderToggle(b, scheduleSave) {
 
 // Колонки — N незалежних вкладених списків блоків поруч; кількість колонок
 // можна збільшувати/зменшувати, у кожній — той самий «+» на додавання блоків.
+// Затиснувши за ручку (⣿) у лівому верхньому куті, колонку можна перетягнути
+// на будь-яке інше місце серед колонок цього блоку.
 function renderColumns(b, scheduleSave) {
   if (!b.columns?.length) b.columns = [[{ id: uid(), type: 'paragraph', text: '' }], [{ id: uid(), type: 'paragraph', text: '' }]];
   const wrap = el('div', { class: 'desc-columns' });
+  let draggingIdx = null;
   function renderCols() {
     wrap.textContent = '';
-    wrap.append(...b.columns.map((colBlocks, ci) => el('div', { class: 'desc-column' },
-      b.columns.length > 1
-        ? el('button', { type: 'button', class: 'desc-col-remove', title: 'Прибрати колонку', onclick: () => { b.columns.splice(ci, 1); renderCols(); scheduleSave(); } }, icon('close', 10))
-        : null,
-      renderBlockList(colBlocks, scheduleSave))));
+    wrap.append(...b.columns.map((colBlocks, ci) => {
+      const dragHandle = el('div', { class: 'desc-col-drag', draggable: 'true', title: 'Перетягніть, щоб перемістити колонку' }, icon('grip', 12));
+      const col = el('div', { class: 'desc-column' },
+        dragHandle,
+        b.columns.length > 1
+          ? el('button', { type: 'button', class: 'desc-col-remove', title: 'Прибрати колонку', onclick: () => { b.columns.splice(ci, 1); renderCols(); scheduleSave(); } }, icon('close', 10))
+          : null,
+        renderBlockList(colBlocks, scheduleSave));
+      dragHandle.addEventListener('dragstart', (e) => { draggingIdx = ci; col.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+      dragHandle.addEventListener('dragend', () => col.classList.remove('dragging'));
+      col.addEventListener('dragover', (e) => { if (draggingIdx == null) return; e.preventDefault(); col.classList.add('drag-over'); });
+      col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
+      col.addEventListener('drop', (e) => {
+        if (draggingIdx == null) return;
+        e.preventDefault(); col.classList.remove('drag-over');
+        const [item] = b.columns.splice(draggingIdx, 1);
+        b.columns.splice(ci, 0, item);
+        draggingIdx = null;
+        renderCols(); scheduleSave();
+      });
+      return col;
+    }));
     wrap.append(el('button', {
       type: 'button', class: 'desc-col-add', title: 'Додати колонку',
       onclick: () => { b.columns.push([{ id: uid(), type: 'paragraph', text: '' }]); renderCols(); scheduleSave(); },
@@ -742,7 +820,9 @@ export async function renderTaskBoard(boardId) {
   let space, board, members, boardTags, rawColumns;
   let dragging = null;
   let draggingColumn = null;
-  let view = 'board'; // 'board' | 'list'
+  let view = 'board'; // 'board' | 'list' | 'calendar'
+  let calMode = 'week'; // 'week' | 'month' — тільки для view === 'calendar'
+  let calAnchor = new Date();
   // Мультивибір скрізь: 0/1/кілька виконавців, тегів, рівнів пріоритету
   // одночасно — порожня множина = фільтр вимкнено.
   const filters = { assigneeIds: new Set(), tagIds: new Set(), priorities: new Set() };
@@ -856,30 +936,20 @@ export async function renderTaskBoard(boardId) {
         box2.append(el('div', { class: 'task-popover-heading' }, 'Теги'));
         if (!(boardTags || []).length) box2.append(el('div', { class: 'muted', style: 'padding:2px 8px 6px;font-size:12px' }, 'Тегів на дошці ще нема'));
         (boardTags || []).forEach((t) => {
-          const cb = el('input', {
-            type: 'checkbox', checked: filters.tagIds.has(t.id) ? true : null,
-            onclick: (ev) => {
-              ev.stopPropagation();
-              if (ev.target.checked) filters.tagIds.add(t.id); else filters.tagIds.delete(t.id);
-              filterText.textContent = filterLabel('Фільтри', filters.tagIds.size + filters.priorities.size);
-              renderBody();
-            },
-          });
-          box2.append(el('div', { class: 'task-popover-item' }, cb, tagChip(t)));
+          box2.append(checkboxRow(filters.tagIds.has(t.id), (checked) => {
+            if (checked) filters.tagIds.add(t.id); else filters.tagIds.delete(t.id);
+            filterText.textContent = filterLabel('Фільтри', filters.tagIds.size + filters.priorities.size);
+            renderBody();
+          }, tagChip(t)));
         });
         box2.append(el('div', { class: 'task-popover-heading' }, 'Пріоритет'));
         PRIORITIES.forEach((p) => {
-          const cb = el('input', {
-            type: 'checkbox', checked: filters.priorities.has(p.value) ? true : null,
-            onclick: (ev) => {
-              ev.stopPropagation();
-              if (ev.target.checked) filters.priorities.add(p.value); else filters.priorities.delete(p.value);
-              filterText.textContent = filterLabel('Фільтри', filters.tagIds.size + filters.priorities.size);
-              renderBody();
-            },
-          });
           const ic = icon('flag', 13); ic.style.color = p.color;
-          box2.append(el('div', { class: 'task-popover-item' }, cb, ic, p.label));
+          box2.append(checkboxRow(filters.priorities.has(p.value), (checked) => {
+            if (checked) filters.priorities.add(p.value); else filters.priorities.delete(p.value);
+            filterText.textContent = filterLabel('Фільтри', filters.tagIds.size + filters.priorities.size);
+            renderBody();
+          }, ic, p.label));
         });
       });
     });
@@ -891,16 +961,11 @@ export async function renderTaskBoard(boardId) {
       openPopover(assigneeBtn, (box2) => {
         if (!members.length) box2.append(el('div', { class: 'muted', style: 'padding:4px 8px;font-size:12px' }, 'Учасників ще нема'));
         members.forEach((m) => {
-          const cb = el('input', {
-            type: 'checkbox', checked: filters.assigneeIds.has(m.user_id) ? true : null,
-            onclick: (ev) => {
-              ev.stopPropagation();
-              if (ev.target.checked) filters.assigneeIds.add(m.user_id); else filters.assigneeIds.delete(m.user_id);
-              assigneeText.textContent = filterLabel('Виконавці', filters.assigneeIds.size);
-              renderBody();
-            },
-          });
-          box2.append(el('div', { class: 'task-popover-item' }, cb, avatarEl(m.name, m.user_id, 18), m.name));
+          box2.append(checkboxRow(filters.assigneeIds.has(m.user_id), (checked) => {
+            if (checked) filters.assigneeIds.add(m.user_id); else filters.assigneeIds.delete(m.user_id);
+            assigneeText.textContent = filterLabel('Виконавці', filters.assigneeIds.size);
+            renderBody();
+          }, avatarEl(m.name, m.user_id, 18), m.name));
         });
       });
     });
@@ -917,7 +982,8 @@ export async function renderTaskBoard(boardId) {
       el('a', { href: `#/space/${space.id}`, style: 'display:inline-flex;align-items:center;gap:4px;font-size:12.5px' },
         icon('chevronLeft', 13), space.name),
       el('b', { style: 'font-size:16px' }, board.name),
-      el('div', { class: 'tabs', style: 'margin:0' }, viewBtn('board', withIcon('grid', 'Дошка')), viewBtn('list', withIcon('fileText', 'Список'))),
+      el('div', { class: 'tabs', style: 'margin:0' },
+        viewBtn('board', withIcon('grid', 'Дошка')), viewBtn('list', withIcon('fileText', 'Список')), viewBtn('calendar', withIcon('calendar', 'Календар'))),
       el('div', { style: 'flex:1 1 auto' }),
       renderFilters(),
       boardMenuBtn));
@@ -934,9 +1000,106 @@ export async function renderTaskBoard(boardId) {
     activeIntervals.forEach(clearInterval); activeIntervals = [];
     kanban.textContent = '';
     kanban.classList.toggle('kanban-list-mode', view === 'list');
+    kanban.classList.toggle('kanban-calendar-mode', view === 'calendar');
     const columns = filteredColumns();
     if (view === 'list') kanban.append(renderListView(columns));
+    else if (view === 'calendar') kanban.append(renderCalendarHead(), calMode === 'week' ? renderCalendarWeek(columns) : renderCalendarMonth(columns));
     else kanban.append(...columns.map(renderColumn), addColumnTile());
+  }
+
+  // ── Календар — окрема повноекранна вьюха задач дошки (не картки-плитки, а
+  // дні тижня/місяця): задача показується в день дедлайну (або старту, якщо
+  // дедлайну нема), клік по ній відкриває ту саму картку. «Сьогодні»/стрілки
+  // гортають тиждень або місяць, перемикач Тиждень/Місяць — поруч. ────────
+  const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
+  const calPad = (n) => String(n).padStart(2, '0');
+  const calDayKey = (dt) => `${dt.getFullYear()}-${calPad(dt.getMonth() + 1)}-${calPad(dt.getDate())}`;
+  function calStartOfWeek(dt) {
+    const nd = new Date(dt); const shift = (nd.getDay() + 6) % 7;
+    nd.setDate(nd.getDate() - shift); nd.setHours(0, 0, 0, 0);
+    return nd;
+  }
+  function calCardsByDate(columns) {
+    const map = new Map();
+    columns.forEach((col) => {
+      col.cards.forEach((c) => {
+        const key = (c.due_date || c.start_date || '').slice(0, 10);
+        if (!key) return;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push({ card: c, col });
+      });
+    });
+    return map;
+  }
+  function calTaskChip(card, col) {
+    const hex = tagColorHex(col.color);
+    const m = members.find((mm) => mm.user_id === card.assignee_user_id);
+    const p = priorityOf(card.priority);
+    const chip = el('div', { class: 'cal-task-chip', style: `border-left-color:${hex}`, title: card.title },
+      p.value ? (() => { const ic = icon('flag', 11); ic.style.color = p.color; return ic; })() : null,
+      m ? avatarEl(m.name, m.user_id, 14) : null,
+      el('span', { class: 'cal-task-chip-title' }, card.title));
+    chip.addEventListener('click', (e) => { e.stopPropagation(); openTaskCard(card.id, reload); });
+    return chip;
+  }
+  function calShiftAnchor(dir) {
+    const nd = new Date(calAnchor);
+    if (calMode === 'week') nd.setDate(nd.getDate() + dir * 7); else nd.setMonth(nd.getMonth() + dir);
+    calAnchor = nd;
+  }
+  function renderCalendarHead() {
+    const weekStart = calStartOfWeek(calAnchor);
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 6);
+    const fmtShort = (dt) => `${calPad(dt.getDate())}.${calPad(dt.getMonth() + 1)}`;
+    const label = calMode === 'week'
+      ? `${fmtShort(weekStart)} — ${fmtShort(weekEnd)}`
+      : calAnchor.toLocaleDateString('uk-UA', { month: 'long', year: 'numeric' });
+    const modeBtn = (key, label2) => el('button', {
+      class: `btn small${calMode === key ? ' active' : ''}`, onclick: () => { calMode = key; renderBody(); },
+    }, label2);
+    return el('div', { class: 'cal-toolbar' },
+      el('button', { class: 'btn small icon-only', title: 'Назад', onclick: () => { calShiftAnchor(-1); renderBody(); } }, icon('chevronLeft', 14)),
+      el('button', { class: 'btn small', onclick: () => { calAnchor = new Date(); renderBody(); } }, 'Сьогодні'),
+      el('button', { class: 'btn small icon-only', title: 'Вперед', onclick: () => { calShiftAnchor(1); renderBody(); } }, icon('chevronRight', 14)),
+      el('b', { style: 'margin:0 8px;text-transform:capitalize' }, label),
+      el('div', { style: 'flex:1 1 auto' }),
+      el('div', { class: 'tabs', style: 'margin:0' }, modeBtn('week', 'Тиждень'), modeBtn('month', 'Місяць')));
+  }
+  function renderCalendarWeek(columns) {
+    const byDate = calCardsByDate(columns);
+    const start = calStartOfWeek(calAnchor);
+    const todayKey = calDayKey(new Date());
+    const wrap = el('div', { class: 'cal-week' });
+    for (let i = 0; i < 7; i += 1) {
+      const d = new Date(start); d.setDate(d.getDate() + i);
+      const key = calDayKey(d);
+      const items = byDate.get(key) || [];
+      wrap.append(el('div', { class: `cal-day${key === todayKey ? ' today' : ''}` },
+        el('div', { class: 'cal-day-head' }, el('span', {}, WEEKDAYS[i]), el('b', {}, String(d.getDate()))),
+        el('div', { class: 'cal-day-items' }, ...items.map(({ card, col }) => calTaskChip(card, col)))));
+    }
+    return wrap;
+  }
+  function renderCalendarMonth(columns) {
+    const byDate = calCardsByDate(columns);
+    const first = new Date(calAnchor.getFullYear(), calAnchor.getMonth(), 1);
+    const gridStart = calStartOfWeek(first);
+    const todayKey = calDayKey(new Date());
+    const wrap = el('div', { class: 'cal-month' });
+    WEEKDAYS.forEach((wd) => wrap.append(el('div', { class: 'cal-month-wd' }, wd)));
+    for (let i = 0; i < 42; i += 1) {
+      const d = new Date(gridStart); d.setDate(d.getDate() + i);
+      const key = calDayKey(d);
+      const items = byDate.get(key) || [];
+      const inMonth = d.getMonth() === calAnchor.getMonth();
+      const shown = items.slice(0, 3);
+      const rest = items.length - shown.length;
+      wrap.append(el('div', { class: `cal-mday${inMonth ? '' : ' outside'}${key === todayKey ? ' today' : ''}` },
+        el('div', { class: 'cal-mday-num' }, String(d.getDate())),
+        el('div', { class: 'cal-mday-items' }, ...shown.map(({ card, col }) => calTaskChip(card, col)),
+          rest > 0 ? el('div', { class: 'cal-mday-more' }, `+${rest} ще`) : null)));
+    }
+    return wrap;
   }
 
   // ── Нова колонка — плитка праворуч від останньої, а не кнопка в шапці
@@ -1303,12 +1466,6 @@ export async function renderTaskBoard(boardId) {
 
 // ── Картка задачі: великий попап з полями зліва й Activity/коментарями
 // справа — режим редагування, як на скріні ClickUp. ───────────────────────
-function toLocalInput(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 export async function openTaskCard(cardId, onChange = () => {}) {
   const ent = state.meta.task_spaces;
@@ -1358,26 +1515,66 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       onDelete ? el('button', { class: 'btn small icon-only danger', onclick: onDelete }, icon('trash', 11)) : null);
   }
 
-  // Редагувати можна або «скільки хвилин» (швидко), або точні межі «з —
-  // до» — якщо заповнено обидва точні поля, вони мають пріоритет.
-  function editTimeEntry(entryId) {
+  // Невеличкий попап на місці кліку (а не окрема модалка): час початку —
+  // час кінця, бейдж «+N», якщо кінець на інший день (з календариком, щоб
+  // змінити саму дату), і жирна сума праворуч — той самий вигляд і з
+  // кліку по сумі в «Трекер часу», і з кліку по згадці таймера в стрічці.
+  function editTimeEntry(entryId, anchor) {
     const entry = d.timeEntries.find((t) => t.id === entryId);
     if (!entry) return;
-    const minutesInput = el('input', { type: 'number', min: '0', value: Math.round((entry.seconds || 0) / 60) });
-    const startInput = el('input', { type: 'datetime-local', value: toLocalInput(entry.started_at) });
-    const endInput = el('input', { type: 'datetime-local', value: entry.ended_at ? toLocalInput(entry.ended_at) : '' });
-    const m = modal('Редагувати трекер часу', el('div', {},
-      el('div', { class: 'field' }, el('label', {}, 'Скільки часу (хвилин)'), minutesInput),
-      el('div', { class: 'muted', style: 'margin:10px 0 6px;font-size:12px' }, 'або точний час, з якого по яку годину:'),
-      el('div', { class: 'field' }, el('label', {}, 'З'), startInput),
-      el('div', { class: 'field' }, el('label', {}, 'До'), endInput)),
-      [actionButton('Зберегти', async () => {
-        const body = (startInput.value && endInput.value)
-          ? { started_at: new Date(startInput.value).toISOString(), ended_at: new Date(endInput.value).toISOString() }
-          : { seconds: Number(minutesInput.value || 0) * 60 };
-        try { await api.put(`/task_time_entries/${entryId}`, body); m.remove(); await refresh(); }
-        catch (e) { toast(e.message, true); }
-      })]);
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const dayKey = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+    const timeKey = (dt) => `${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
+    const startD = new Date(entry.started_at);
+    const endD = entry.ended_at ? new Date(entry.ended_at) : new Date();
+
+    openPopover(anchor, (box2) => {
+      const startTimeInput = el('input', { type: 'time', value: timeKey(startD) });
+      const endTimeInput = el('input', { type: 'time', value: timeKey(endD) });
+      const startDateInput = el('input', { type: 'date', value: dayKey(startD) });
+      const endDateInput = el('input', { type: 'date', value: dayKey(endD) });
+      const dayBadge = el('span', { class: 'time-edit-daybadge hidden' });
+      const totalLabel = el('b', { class: 'time-edit-total' });
+      const datesWrap = el('div', { class: 'time-edit-dates hidden' },
+        el('div', { class: 'task-popover-item', style: 'cursor:default' }, el('span', { class: 'muted', style: 'width:30px' }, 'З'), startDateInput),
+        el('div', { class: 'task-popover-item', style: 'cursor:default' }, el('span', { class: 'muted', style: 'width:30px' }, 'До'), endDateInput));
+      const calBtn = el('button', { class: 'btn small icon-only', type: 'button', title: 'Змінити дату', onclick: () => datesWrap.classList.toggle('hidden') }, icon('calendar', 13));
+
+      function currentRange() {
+        const s = new Date(`${startDateInput.value}T${startTimeInput.value || '00:00'}`);
+        const e = new Date(`${endDateInput.value}T${endTimeInput.value || '00:00'}`);
+        return { s, e };
+      }
+      // Поля дають лише точність до хвилини (як на референсі) — доки
+      // користувач нічого не чіпав, сума показує СПРАВЖНІ (з точністю до
+      // секунди) початкові started_at/ended_at, а не округлену з полів;
+      // округлення до хвилини настає лише після реального редагування.
+      function sync(precise) {
+        const { s, e } = precise ? { s: startD, e: endD } : currentRange();
+        const diffDays = Math.round((new Date(e.toDateString()) - new Date(s.toDateString())) / 86400000);
+        dayBadge.textContent = diffDays > 0 ? `+${diffDays}` : '';
+        dayBadge.classList.toggle('hidden', diffDays <= 0);
+        totalLabel.textContent = formatHMS((e - s) / 1000);
+      }
+      let saveTimer = null;
+      function save() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(async () => {
+          const { s, e } = currentRange();
+          try { await api.put(`/task_time_entries/${entryId}`, { started_at: s.toISOString(), ended_at: e.toISOString() }); await refresh(); }
+          catch (err) { toast(err.message, true); }
+        }, 400);
+      }
+      [startTimeInput, endTimeInput, startDateInput, endDateInput].forEach((inp) => {
+        inp.addEventListener('change', () => { sync(false); save(); });
+      });
+      sync(true);
+
+      box2.append(el('div', { class: 'time-edit-row' },
+        startTimeInput, el('span', { class: 'muted' }, '–'), endTimeInput, dayBadge, calBtn,
+        el('div', { style: 'flex:1 1 auto' }), totalLabel),
+        datesWrap);
+    });
   }
 
   function fieldRow(...cells) { return el('div', { class: 'task-field-row' }, ...cells); }
@@ -1430,7 +1627,7 @@ export async function openTaskCard(cardId, onChange = () => {}) {
     const timeLabel = el('span', {
       class: `muted${timeLabelClickable ? ' activity-clickable' : ''}`, style: 'font-size:12px',
       title: timeLabelClickable ? 'Редагувати запис часу' : undefined,
-      onclick: timeLabelClickable ? () => editTimeEntry(lastEntry.id) : undefined,
+      onclick: timeLabelClickable ? () => editTimeEntry(lastEntry.id, timeLabel) : undefined,
     }, formatSeconds(totalSeconds));
     if (isRunning) {
       const startedAt = new Date(runningTimer.started_at).getTime();
@@ -1494,7 +1691,7 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       ...activity.filter((a) => a.kind !== 'commented').map((a) => {
         const p = a.payload ? JSON.parse(a.payload) : {};
         const clickable = (a.kind === 'time_started' || a.kind === 'time_stopped') && p.entry_id;
-        const textNode = el('div', clickable ? { class: 'activity-clickable', title: 'Редагувати запис часу', onclick: () => editTimeEntry(p.entry_id) } : {}, activityText(a));
+        const textNode = el('div', clickable ? { class: 'activity-clickable', title: 'Редагувати запис часу', onclick: () => editTimeEntry(p.entry_id, textNode) } : {}, activityText(a));
         return { created_at: a.created_at, node: el('div', { class: 'activity-item' },
           el('div', { class: 'activity-bullet' }),
           el('div', { class: 'activity-body' }, textNode, el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(a.created_at)))) };
