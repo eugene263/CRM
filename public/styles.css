@@ -195,36 +195,62 @@ label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px
   margin-top: 10px; text-transform: uppercase; letter-spacing: .02em; white-space: nowrap;
 }
 
-/* Плитка «+ Колонка» — праворуч від останньої колонки дошки, а не кнопка
-   в шапці. */
+/* «+ Колонка» — компактна кнопка вгорі, праворуч від останньої колонки
+   (не висока плашка на всю висоту дошки). */
 .kanban-add-col {
-  flex: 0 0 180px; width: 180px; align-self: stretch; min-height: 64px;
-  border: 1.5px dashed var(--line); border-radius: var(--radius); background: transparent;
-  color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
-  font-size: 13px; transition: border-color .12s, color .12s;
+  flex: 0 0 auto; align-self: flex-start; height: 34px; margin-top: 1px;
+  border: 1.5px dashed var(--line); border-radius: 9px; background: transparent;
+  color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 13px; padding: 0 14px; transition: border-color .12s, color .12s;
 }
 .kanban-add-col:hover { border-color: var(--accent); color: var(--text); }
 
 /* Компактний рядок іконок на плашці картки (виконавець/дати/пріоритет/
    теги) — значення видно одразу, порожнє поле — просто іконка, на яку
-   можна клікнути й одразу обрати, не заходячи в картку. */
+   можна клікнути й одразу обрати, не заходячи в картку. Іконки — єдиний
+   нейтральний колір (крім прапорця пріоритету, у нього власний inline-
+   колір, який тут не чіпаємо). */
 .kanban-card-mini-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 8px; }
+.kanban-card-mini-row .icon { color: var(--muted); }
 .task-picker-btn.mini { width: auto; padding: 3px 5px; gap: 3px; font-size: 11.5px; border-radius: 999px; }
 .task-picker-btn.mini:hover, .task-picker-btn.mini:focus { background: var(--panel-2); }
 .kanban-card-timer { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
 .kanban-card-timer.live { color: var(--accent-2); font-variant-numeric: tabular-nums; }
 
-/* Швидке створення картки — заголовок і одразу основні поля, без
-   відкриття повної картки (Save/Enter зберігає). */
+/* ── Вьюха «Список» — ті самі колонки/картки, згруповані таблицею. ────── */
+.kanban.kanban-list-mode { display: block; overflow-x: visible; padding-bottom: 0; }
+.list-view { display: flex; flex-direction: column; gap: 4px; }
+.list-group-head { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; }
+.list-group-head:first-child { margin-top: 0; }
+.list-group-badge {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px;
+  color: #fff; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em;
+}
+.list-table { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.list-row {
+  display: grid; grid-template-columns: 2fr 1fr 110px 130px 100px; gap: 10px; align-items: center;
+  padding: 9px 14px; border-top: 1px solid var(--line); font-size: 13px; cursor: pointer;
+}
+.list-row:first-child { border-top: none; }
+.list-table-head { cursor: default; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; background: var(--panel-2); }
+.list-row:not(.list-table-head):hover { background: var(--panel-2); }
+.list-col-name { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-due { color: var(--accent-2); }
+
+.task-filter-select { font-size: 12.5px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); }
+
+/* Швидке створення картки — заголовок на всю ширину зверху, поля-рядки
+   нижче, «Зберегти» — окремою кнопкою на всю ширину внизу (не поряд із
+   заголовком). Клік поза формою (не в попапі вибору) згортає її назад. */
 .quick-add-box { border: 1.5px solid var(--accent); border-radius: 10px; padding: 8px; margin-top: 8px; background: var(--panel); }
-.quick-add-title-row { display: flex; gap: 6px; align-items: center; }
-.quick-add-title { flex: 1 1 auto; min-width: 0; font-size: 13.5px; }
-.quick-add-rows { display: flex; flex-direction: column; margin-top: 6px; }
+.quick-add-title { width: 100%; font-size: 13.5px; padding: 6px 7px; }
+.quick-add-rows { display: flex; flex-direction: column; margin-top: 2px; }
 .quick-add-row {
   display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 6px;
   background: transparent; border: none; color: var(--text); font-size: 12.5px; cursor: pointer; text-align: left; width: 100%;
 }
 .quick-add-row:hover { background: var(--panel-2); }
+.quick-add-save { width: 100%; justify-content: center; margin-top: 6px; padding: 6px 0; font-size: 13px; }
 
 /* Картки списків пошуку */
 .list-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
@@ -525,11 +551,19 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 }
 .task-field-value select:hover, .task-field-value input:hover,
 .task-field-value select:focus, .task-field-value input:focus { background: var(--panel-2); outline: none; }
-.task-status-select {
-  display: inline-block; width: auto !important; background: var(--primary) !important; color: var(--primary-text) !important;
-  font-weight: 600; font-size: 12px; border-radius: 6px !important; padding: 4px 10px !important;
+/* Статус — пігулка в кольорі відповідної колонки дошки (не фіксований
+   акцент), стрілочка після тексту вказує НАПРЯМОК (▶ — це кнопка з
+   попапом, а не розкривний <select> із ▼). */
+.task-status-pill {
+  display: inline-flex; align-items: center; gap: 5px; width: auto; border: none;
+  font-weight: 600; font-size: 12px; border-radius: 999px; padding: 4px 10px; cursor: pointer;
 }
 .task-timer-cell { width: 100%; }
+
+/* Пара «дата початку → дедлайн»: обидва input рівно стискаються (min-width:0,
+   flex:1 1 0), інакше в тісній клітинці вони вилазять за межі рядка. */
+.task-dates-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.task-dates-row input[type="date"] { flex: 0 1 160px; min-width: 0; width: auto; }
 
 .task-desc {
   min-height: 70px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
@@ -545,11 +579,10 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 .task-quick-row:hover { background: var(--panel-2); color: var(--text); }
 
 .activity-feed { flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; margin-bottom: 10px; }
-.activity-item { display: flex; gap: 8px; font-size: 12.5px; }
+.activity-item { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; }
 .activity-bullet { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--line); margin-top: 5px; }
 .activity-body { flex: 1 1 auto; min-width: 0; }
 .activity-item.comment .activity-body { background: var(--panel-2); border-radius: 8px; padding: 8px; }
-.activity-item.comment .activity-bullet { background: var(--accent); }
 
 .task-comment-box { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
 .task-comment-box textarea { border: none; background: transparent; padding: 4px; resize: vertical; }
@@ -596,6 +629,7 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 .task-tag-row:hover { background: var(--panel-2); }
 .task-tag-new-row { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-top: 1px solid var(--line); margin-top: 4px; }
 .task-tag-new-row input { flex: 1 1 auto; min-width: 0; }
+.task-tag-new-colors { display: flex; gap: 6px; padding: 0 8px 8px; }
 
 /* ── Опис задачі: Notion-подібний редактор блоків. Наведення на рядок
    показує зліва «+» (додати блок нижче) і кошик (видалити цей блок) —
@@ -615,22 +649,58 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 }
 .desc-block-text:hover, .desc-block-text:focus { background: var(--panel-2); outline: none; }
 .desc-block > div:not(.desc-block-gutter) { flex: 1 1 auto; min-width: 0; }
+/* Плейсхолдер для contenteditable-параграфа (текстовий блок) */
+div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(--muted); }
 
+/* Тулбар форматування тексту — рядок іконок над блоком, з'являється по
+   фокусу на текст, ховається (клас .hidden) по блюру. */
+.desc-fmt-toolbar { display: flex; gap: 2px; margin-bottom: 3px; }
+.desc-fmt-btn {
+  min-width: 22px; height: 22px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 5px;
+  cursor: pointer; font-size: 11px; font-weight: 700;
+}
+.desc-fmt-btn:hover { border-color: var(--accent); }
+
+/* Чек-лист — чекбокс і текст щільно поруч (мінімальний gap), по лівому краю. */
 .desc-checklist { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
-.desc-checklist-row { display: flex; align-items: center; gap: 8px; }
-.desc-checklist-text { flex: 1 1 auto; min-width: 0; border: none; background: transparent; padding: 4px 6px; border-radius: 6px; font: inherit; }
+.desc-checklist-row { display: flex; align-items: center; gap: 4px; }
+.desc-checklist-text { flex: 1 1 auto; min-width: 0; border: none; background: transparent; padding: 4px 2px; border-radius: 6px; font: inherit; }
 .desc-checklist-text:hover, .desc-checklist-text:focus { background: var(--panel-2); outline: none; }
 .desc-checklist-row input[type="checkbox"]:checked + .desc-checklist-text { text-decoration: line-through; color: var(--muted); }
 
-.desc-table-wrap { flex: 1 1 auto; min-width: 0; padding: 4px 0; }
+/* Таблиця — без постійних кнопок «+рядок/+стовпець»: хендли по кутах
+   клітинки з'являються тільки при наведенні на неї. Верх-право = завжди
+   «додати колонку праворуч» (зелений). Верх-ліво ПЕРШОЇ колонки = «додати
+   рядок вище» (зелений, підсвічує весь рядок); той самий кут в інших
+   колонках = «видалити колонку» (червоний, підсвічує колонку). Низ-ліво
+   першої колонки = «видалити рядок» (червоний, підсвічує рядок). */
+.desc-table-wrap { flex: 1 1 auto; min-width: 0; padding: 4px 0 10px; }
 .desc-table { border-collapse: collapse; width: auto; }
-.desc-table td { border: 1px solid var(--line); padding: 0; white-space: normal; }
+.desc-table td { border: 1px solid var(--line); padding: 0; white-space: normal; position: relative; }
 .desc-table td input { width: 100%; min-width: 90px; border: none; background: transparent; padding: 6px 8px; font: inherit; }
 .desc-table td input:focus { outline: none; background: var(--panel-2); }
-.desc-table-toolbar { display: flex; gap: 4px; margin-top: 6px; }
-.desc-table-toolbar .btn { font-size: 11.5px; padding: 4px 8px; }
+.desc-table-handle {
+  position: absolute; width: 15px; height: 15px; border-radius: 50%; border: none; color: #fff;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer;
+  opacity: 0; pointer-events: none; transition: opacity .1s; z-index: 2;
+}
+.desc-table td:hover .desc-table-handle { opacity: 1; pointer-events: auto; }
+.desc-table-handle.add { background: var(--accent-2, #12b886); }
+.desc-table-handle.del { background: var(--danger); }
+.desc-table-handle.top-right { top: -7px; right: -7px; }
+.desc-table-handle.top-left { top: -7px; left: -7px; }
+.desc-table-handle.bottom-left { bottom: -7px; left: -7px; }
+.desc-table td.col-add-hl, .desc-table td.row-add-hl { background: color-mix(in srgb, var(--accent-2, #12b886) 16%, transparent); }
+.desc-table td.col-del-hl, .desc-table td.row-del-hl { background: color-mix(in srgb, var(--danger) 16%, transparent); }
 
-.desc-toggle-head { display: flex; align-items: center; gap: 4px; }
-.desc-toggle-head .icon { transition: transform .12s; }
+/* Спадний список — стрілочка щільно біля заголовка, без плашки-кнопки під нею. */
+.desc-toggle-head { display: flex; align-items: center; gap: 2px; }
+.desc-toggle-btn {
+  border: none; background: transparent; color: var(--muted); padding: 2px; display: inline-flex;
+  align-items: center; justify-content: center; cursor: pointer; border-radius: 4px;
+}
+.desc-toggle-btn:hover { color: var(--text); }
+.desc-toggle-btn .icon { transition: transform .12s; }
 .desc-toggle-title { flex: 1 1 auto; min-width: 0; border: none; background: transparent; padding: 4px 6px; border-radius: 6px; font: inherit; font-weight: 600; }
 .desc-toggle-title:hover, .desc-toggle-title:focus { background: var(--panel-2); outline: none; }

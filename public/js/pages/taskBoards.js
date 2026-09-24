@@ -125,10 +125,37 @@ function buildPriorityField(card, onSet, { compact = false } = {}) {
   return btn;
 }
 
+// Статус — та сама кольорова пігулка, що й заголовок колонки на дошці
+// (обраний колір колонки), з попапом-списком усіх колонок дошки в їхніх
+// власних кольорах. Стрілочка після тексту показує НАПРЯМОК (▶), а не
+// «розкривний список» (▼) — це кнопка з попапом, а не native <select>.
+function buildStatusField(card, columns, onSet) {
+  const current = columns.find((c) => c.id === card.column_id) || columns[0];
+  const hex = tagColorHex(current?.color);
+  const btn = el('button', {
+    class: 'task-status-pill', type: 'button', style: `background:${hex}22;color:${hex}`,
+  }, current?.name || '—', icon('chevronRight', 13));
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openPopover(btn, (box2) => {
+      box2.append(...columns.map((c) => {
+        const chex = tagColorHex(c.color);
+        return el('div', {
+          class: 'task-popover-item', onclick: () => { onSet(c.id); box2.remove(); },
+        }, el('span', { class: 'kanban-col-pill', style: `background:${chex}22;color:${chex}` }, c.name));
+      }));
+    });
+  });
+  return btn;
+}
+
 // compact=false — інлайн-пара «дедлайн і дата початку» (повна картка);
 // compact=true — одна кнопка-іконка з попапом на обидві дати (плашка в
 // канбані). Клік будь-де по полю (не лише по значку календаря) одразу
 // відкриває вибір дати: showPicker() саме для цього.
+// Обидва input'и мають min-width:0 і flex:1 1 0 (клас .task-dates-row) —
+// інакше в тісній клітинці таблиці полів input[type=date] не стискається
+// нижче свого нативного мінімуму й вилазить за межі рядка (був баг).
 function buildDatesField(card, onSet, { compact = false } = {}) {
   if (!compact) {
     const startInput = el('input', {
@@ -139,7 +166,7 @@ function buildDatesField(card, onSet, { compact = false } = {}) {
       type: 'date', value: card.due_date || '', title: 'Дедлайн',
       onclick: (e) => e.target.showPicker?.(), onchange: () => onSet({ due_date: dueInput.value || null }),
     });
-    return el('div', { style: 'display:flex;align-items:center;gap:6px' }, startInput, el('span', { class: 'muted' }, '→'), dueInput);
+    return el('div', { class: 'task-dates-row' }, startInput, el('span', { class: 'muted' }, '→'), dueInput);
   }
   const btn = el('button', { class: 'task-picker-btn mini', type: 'button', title: 'Дати' });
   btn.append(icon('calendar', 13));
@@ -194,13 +221,25 @@ function buildTagsField(cardTags, boardTags, boardId, applyIds, afterTagsChanged
               onclick: (ev) => { ev.stopPropagation(); box2.remove(); editTagModal(t, boardId, afterTagsChanged); },
             }, icon('edit', 11)));
         }));
+        // Колір нового тегу обирається одразу тут, до створення — не
+        // доводиться потім окремо відкривати редагування, щоб перефарбувати.
+        let newColor = TAG_COLORS[0].key;
         const newInput = el('input', { placeholder: 'Новий тег', style: 'font-size:12.5px' });
+        const swatchRow = el('div', { class: 'task-tag-new-colors' });
+        function renderSwatches() {
+          swatchRow.textContent = '';
+          swatchRow.append(...TAG_COLORS.map((c) => el('button', {
+            type: 'button', class: `map-color-swatch${newColor === c.key ? ' active' : ''}`, style: `width:16px;height:16px;background:${c.hex};border-color:${c.hex}`,
+            onclick: (ev) => { ev.stopPropagation(); newColor = c.key; renderSwatches(); },
+          })));
+        }
+        renderSwatches();
         const addNew = async () => {
           const name = newInput.value.trim();
           if (!name) return;
           try {
-            const { id } = await api.post(`/task_boards/${boardId}/tags`, { name, color: 'accent' });
-            boardTags.push({ id, name, color: 'accent' });
+            const { id } = await api.post(`/task_boards/${boardId}/tags`, { name, color: newColor });
+            boardTags.push({ id, name, color: newColor });
             selected.add(id);
             newInput.value = '';
             await apply();
@@ -209,7 +248,7 @@ function buildTagsField(cardTags, boardTags, boardId, applyIds, afterTagsChanged
         };
         newInput.addEventListener('keydown', (e2) => { if (e2.key === 'Enter') addNew(); });
         box2.append(el('div', { class: 'task-tag-new-row' }, newInput,
-          el('button', { class: 'btn small icon-only', onclick: addNew }, icon('plus', 12))));
+          el('button', { class: 'btn small icon-only', onclick: addNew }, icon('plus', 12))), swatchRow);
       }
       renderList();
     });
@@ -254,6 +293,84 @@ function makeBlock(type) {
   return { id: uid(), type: 'paragraph', text: '' };
 }
 
+// Текстовий блок опису — contenteditable, тому зберігаємо як HTML. Дозволені
+// теги/атрибути — жорсткий allowlist (bold/italic/underline/колір/розмір,
+// які й видає наш тулбар через execCommand); усе інше розгортається чи
+// прибирається. Санітизуємо ПЕРЕД будь-яким innerHTML-рендером (не лише на
+// збереженні) — інакше пряме звернення до API в обхід UI могло б підкласти
+// <img onerror=...> чи схоже, і воно виконалось би в браузері іншого учасника
+// простору, який відкриє цю картку. ─────────────────────────────────────
+const DESC_ALLOWED_TAGS = new Set(['B', 'I', 'U', 'STRONG', 'EM', 'SPAN', 'FONT', 'BR', 'DIV']);
+function sanitizeInlineHtml(html) {
+  const doc = new DOMParser().parseFromString(`<div>${html || ''}</div>`, 'text/html');
+  const root = doc.body.firstChild;
+  function clean(node) {
+    [...node.childNodes].forEach((child) => {
+      if (child.nodeType === Node.COMMENT_NODE) { child.remove(); return; }
+      if (child.nodeType !== Node.ELEMENT_NODE) return;
+      if (!DESC_ALLOWED_TAGS.has(child.tagName)) {
+        while (child.firstChild) child.parentNode.insertBefore(child.firstChild, child);
+        child.remove();
+        return;
+      }
+      [...child.attributes].forEach((attr) => {
+        const name = attr.name.toLowerCase();
+        if (name === 'style') {
+          const safe = [];
+          for (const decl of attr.value.split(';')) {
+            const [prop, val] = decl.split(':').map((s) => s?.trim());
+            if (prop === 'color' && val && /^(#[0-9a-f]{3,8}|rgb\([\d,\s]+\))$/i.test(val)) safe.push(`color:${val}`);
+            if (prop === 'font-size' && val && /^\d+(\.\d+)?(px|pt|em)$/.test(val)) safe.push(`font-size:${val}`);
+          }
+          if (safe.length) child.setAttribute('style', safe.join(';')); else child.removeAttribute('style');
+        } else if (name === 'color' && child.tagName === 'FONT') {
+          if (!/^#?[0-9a-f]{3,8}$/i.test(attr.value)) child.removeAttribute('color');
+        } else {
+          child.removeAttribute(attr.name);
+        }
+      });
+      clean(child);
+    });
+  }
+  clean(root);
+  return root.innerHTML;
+}
+
+function execFormat(div, cmd, value) { div.focus(); document.execCommand(cmd, false, value); }
+
+// Невеличкий рядок-тулбар над текстовим блоком, зʼявляється по фокусу на
+// текст (а не floating біля курсору) — жирний/курсив/підкреслений/колір/
+// розмір, «самі основні функції».
+function buildFormatToolbar(div, b, scheduleSave) {
+  const sync = () => { b.text = sanitizeInlineHtml(div.innerHTML); scheduleSave(); };
+  const mk = (iconName, title, action, label) => {
+    const btn = el('button', { class: 'desc-fmt-btn', type: 'button', title });
+    if (iconName) btn.append(icon(iconName, 13));
+    if (label) btn.append(label);
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+    btn.addEventListener('click', () => { action(); sync(); });
+    return btn;
+  };
+  const colorBtn = mk('textColor', 'Колір тексту', () => {}, null);
+  colorBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openPopover(colorBtn, (box2) => {
+      box2.append(el('div', { style: 'display:flex;gap:6px;padding:4px' }, ...TAG_COLORS.map((c) => el('button', {
+        type: 'button', class: 'map-color-swatch', style: `width:18px;height:18px;background:${c.hex};border-color:${c.hex}`,
+        onmousedown: (ev) => ev.preventDefault(),
+        onclick: () => { execFormat(div, 'foreColor', c.hex); sync(); box2.remove(); },
+      }))));
+    });
+  });
+  return el('div', { class: 'desc-fmt-toolbar' },
+    mk('bold', 'Жирний', () => execFormat(div, 'bold')),
+    mk('italic', 'Курсив', () => execFormat(div, 'italic')),
+    mk('underline', 'Підкреслений', () => execFormat(div, 'underline')),
+    colorBtn,
+    mk(null, 'Менший розмір', () => execFormat(div, 'fontSize', '2'), 'A-'),
+    mk(null, 'Більший розмір', () => execFormat(div, 'fontSize', '5'), 'A+'));
+}
+
 function renderDescriptionEditor(card, onSave) {
   let blocks = (card.description_blocks && card.description_blocks.length)
     ? card.description_blocks.map((b) => ({ ...b }))
@@ -278,15 +395,20 @@ function renderDescriptionEditor(card, onSave) {
     });
   }
 
+  // Текст — contenteditable з санітизованим HTML і тулбаром форматування
+  // по фокусу (жирний/курсив/підкреслений/колір/розмір).
   function renderParagraph(b) {
-    const ta = el('textarea', {
-      class: 'desc-block-text', rows: 1, placeholder: 'Текст…',
-      oninput: () => { autoGrow(ta); b.text = ta.value; scheduleSave(); },
-    }, b.text || '');
-    setTimeout(() => autoGrow(ta), 0);
-    return ta;
+    const div = el('div', { class: 'desc-block-text', contenteditable: 'true', 'data-placeholder': 'Текст…' });
+    div.innerHTML = sanitizeInlineHtml(b.text || '');
+    const toolbar = buildFormatToolbar(div, b, scheduleSave);
+    toolbar.classList.add('hidden');
+    div.addEventListener('focus', () => toolbar.classList.remove('hidden'));
+    div.addEventListener('blur', () => { toolbar.classList.add('hidden'); b.text = sanitizeInlineHtml(div.innerHTML); scheduleSave(); });
+    div.addEventListener('input', () => { b.text = sanitizeInlineHtml(div.innerHTML); scheduleSave(); });
+    return el('div', {}, toolbar, div);
   }
 
+  // Чек-лист — чекбокс і текст щільно поруч, без прогалини, по лівому краю.
   function renderChecklist(b) {
     const list = el('div', { class: 'desc-checklist' });
     function renderItems() {
@@ -309,36 +431,60 @@ function renderDescriptionEditor(card, onSave) {
     return list;
   }
 
+  // Таблиця — без кнопок «+ рядок/стовпець»: наведення на клітинку показує
+  // маленькі хендли по кутах (верх-право = додати колонку праворуч, зелений
+  // + підсвітка колонки; верх-ліво ПЕРШОЇ колонки = додати рядок вище,
+  // зелений + підсвітка рядка, а для решти колонок той самий кут — видалити
+  // колонку, червоний; низ-ліво першої колонки = видалити рядок, червоний).
   function renderTable(b) {
     if (!b.rows?.length) b.rows = [['', ''], ['', '']];
     const wrapTable = el('div', { class: 'desc-table-wrap' });
     function renderGrid() {
       wrapTable.textContent = '';
-      const table = el('table', { class: 'desc-table' },
-        ...b.rows.map((row) => el('tr', {}, ...row.map((cell, ci) => el('td', {},
-          el('input', {
-            value: cell, oninput: (e) => { row[ci] = e.target.value; scheduleSave(); },
-          }))))));
-      const toolbar = el('div', { class: 'desc-table-toolbar' },
-        el('button', { class: 'btn small icon-only', title: 'Додати рядок', onclick: () => { b.rows.push(b.rows[0].map(() => '')); renderGrid(); scheduleSave(); } }, icon('plus', 11), 'рядок'),
-        el('button', { class: 'btn small icon-only', title: 'Додати стовпець', onclick: () => { b.rows.forEach((row) => row.push('')); renderGrid(); scheduleSave(); } }, icon('plus', 11), 'стовпець'),
-        b.rows.length > 1 ? el('button', { class: 'btn small icon-only', title: 'Прибрати рядок', onclick: () => { b.rows.pop(); renderGrid(); scheduleSave(); } }, icon('minus', 11), 'рядок') : null,
-        b.rows[0].length > 1 ? el('button', { class: 'btn small icon-only', title: 'Прибрати стовпець', onclick: () => { b.rows.forEach((row) => row.pop()); renderGrid(); scheduleSave(); } }, icon('minus', 11), 'стовпець') : null);
-      wrapTable.append(table, toolbar);
+      const table = el('table', { class: 'desc-table' });
+      function highlightCol(ci, cls) { [...table.rows].forEach((tr) => tr.children[ci]?.classList.add(cls)); }
+      function highlightRow(ri, cls) { [...(table.rows[ri]?.children || [])].forEach((td) => td.classList.add(cls)); }
+      function clearHighlight() { table.querySelectorAll('td').forEach((td) => td.classList.remove('col-add-hl', 'col-del-hl', 'row-add-hl', 'row-del-hl')); }
+      function handle(kind, corner, onEnter, onClick, title) {
+        const btn = el('button', { type: 'button', class: `desc-table-handle ${kind} ${corner}`, title }, icon(kind === 'add' ? 'plus' : 'minus', 9));
+        btn.addEventListener('mouseenter', onEnter);
+        btn.addEventListener('mouseleave', clearHighlight);
+        btn.addEventListener('click', (e) => { e.stopPropagation(); onClick(); renderGrid(); scheduleSave(); });
+        return btn;
+      }
+      b.rows.forEach((row, ri) => {
+        const tr = el('tr', {});
+        row.forEach((cell, ci) => {
+          const input = el('input', { value: cell, oninput: (e) => { row[ci] = e.target.value; scheduleSave(); } });
+          const td = el('td', {}, input,
+            handle('add', 'top-right', () => highlightCol(ci, 'col-add-hl'), () => b.rows.forEach((r) => r.splice(ci + 1, 0, '')), 'Додати колонку праворуч'),
+            ci === 0
+              ? handle('add', 'top-left', () => highlightRow(ri, 'row-add-hl'), () => b.rows.splice(ri, 0, b.rows[0].map(() => '')), 'Додати рядок вище')
+              : (row.length > 1 ? handle('del', 'top-left', () => highlightCol(ci, 'col-del-hl'), () => b.rows.forEach((r) => r.splice(ci, 1)), 'Видалити колонку') : null),
+            ci === 0 && b.rows.length > 1
+              ? handle('del', 'bottom-left', () => highlightRow(ri, 'row-del-hl'), () => b.rows.splice(ri, 1), 'Видалити рядок')
+              : null);
+          tr.append(td);
+        });
+        table.append(tr);
+      });
+      wrapTable.append(table);
     }
     renderGrid();
     return wrapTable;
   }
 
+  // Спадний список — стрілочка щільно біля тексту заголовка, без плашки-
+  // кнопки під нею.
   function renderToggle(b) {
     const body = el('textarea', {
       class: 'desc-block-text', rows: 1, placeholder: 'Прихований текст…',
       style: b.open ? '' : 'display:none',
       oninput: () => { autoGrow(body); b.text = body.value; scheduleSave(); },
     }, b.text || '');
-    const chevron = icon('chevronDown', 13);
+    const chevron = icon('chevronDown', 15);
     chevron.style.transform = b.open ? 'rotate(0deg)' : 'rotate(-90deg)';
-    const toggleBtn = el('button', { class: 'btn small icon-only', title: b.open ? 'Згорнути' : 'Розгорнути', onclick: () => { b.open = !b.open; body.style.display = b.open ? '' : 'none'; chevron.style.transform = b.open ? 'rotate(0deg)' : 'rotate(-90deg)'; if (b.open) setTimeout(() => autoGrow(body), 0); scheduleSave(); } }, chevron);
+    const toggleBtn = el('button', { class: 'desc-toggle-btn', type: 'button', title: b.open ? 'Згорнути' : 'Розгорнути', onclick: () => { b.open = !b.open; body.style.display = b.open ? '' : 'none'; chevron.style.transform = b.open ? 'rotate(0deg)' : 'rotate(-90deg)'; if (b.open) setTimeout(() => autoGrow(body), 0); scheduleSave(); } }, chevron);
     const titleInput = el('input', {
       class: 'desc-toggle-title', value: b.title || '', placeholder: 'Заголовок спадного списку…',
       oninput: () => { b.title = titleInput.value; scheduleSave(); },
@@ -533,13 +679,30 @@ export async function renderTaskBoard(boardId) {
   const kanban = el('div', { class: 'kanban', style: 'flex:1 1 auto' });
   page.append(head, kanban);
 
-  let space, board, members, boardTags;
+  let space, board, members, boardTags, rawColumns;
   let dragging = null;
   let draggingColumn = null;
+  let view = 'board'; // 'board' | 'list'
+  const filters = { assigneeId: null, tagId: null };
   // Живі лічильники таймерів прямо на плашках картки (requirement: видно
   // «скільки вже пройшло», не заходячи в картку) — інтервали з попереднього
   // рендеру канбану інакше продовжують цокати в порожнечу після reload().
   let activeIntervals = [];
+
+  // Фільтри діють однаково на обох вьюхах (дошка/список) — фільтруємо
+  // картки всередині кожної колонки, самі колонки лишаються на місці
+  // (порожня колонка після фільтра — це теж інформація).
+  function filteredColumns() {
+    if (!filters.assigneeId && !filters.tagId) return rawColumns;
+    return rawColumns.map((col) => ({
+      ...col,
+      cards: col.cards.filter((c) => {
+        if (filters.assigneeId && c.assignee_user_id !== filters.assigneeId) return false;
+        if (filters.tagId && !(c.tags || []).some((t) => t.id === filters.tagId)) return false;
+        return true;
+      }),
+    }));
+  }
 
   const EDGE = 70, SPEED = 16;
   let scrollDir = 0, scrollRaf = null;
@@ -588,43 +751,80 @@ export async function renderTaskBoard(boardId) {
     await reload();
   });
 
+  function boardMenu(anchor) {
+    openPopover(anchor, (box2) => {
+      box2.append(
+        canEdit ? el('div', {
+          class: 'task-popover-item',
+          onclick: () => {
+            box2.remove();
+            const input = el('input', { value: board.name });
+            const m = modal('Назва дошки', el('div', { class: 'field' }, el('label', {}, 'Назва'), input),
+              [actionButton('Зберегти', async () => {
+                if (!input.value.trim()) return toast('Потрібна назва', true);
+                await api.put(`/task_boards/${boardId}`, { name: input.value.trim() });
+                board.name = input.value.trim();
+                m.remove(); renderHead();
+              })]);
+          },
+        }, icon('edit', 13), 'Перейменувати дошку') : null,
+        canDelete ? el('div', {
+          class: 'task-popover-item danger',
+          onclick: async () => {
+            box2.remove();
+            if (!confirm(`Видалити дошку «${board.name}»?`)) return;
+            try { await api.del(`/task_boards/${boardId}`); location.hash = `#/space/${space.id}`; }
+            catch (e) { toast(e.message, true); }
+          },
+        }, icon('trash', 13), 'Видалити дошку') : null);
+    });
+  }
+
+  // Фільтри — по виконавцю й по тегу (варіанти з'являються, щойно дошка
+  // завантажена бодай раз, бо беруться з members/boardTags). Порожній вибір
+  // = без фільтра.
+  function renderFilters() {
+    const assigneeSelect = el('select', { class: 'task-filter-select' },
+      el('option', { value: '' }, 'Усі виконавці'),
+      ...members.map((m) => el('option', { value: m.user_id, selected: filters.assigneeId === m.user_id ? true : null }, m.name)));
+    assigneeSelect.addEventListener('change', () => { filters.assigneeId = assigneeSelect.value ? Number(assigneeSelect.value) : null; renderBody(); });
+    const tagSelect = el('select', { class: 'task-filter-select' },
+      el('option', { value: '' }, 'Усі теги'),
+      ...(boardTags || []).map((t) => el('option', { value: t.id, selected: filters.tagId === t.id ? true : null }, t.name)));
+    tagSelect.addEventListener('change', () => { filters.tagId = tagSelect.value ? Number(tagSelect.value) : null; renderBody(); });
+    return el('div', { class: 'row', style: 'align-items:center;gap:6px' }, icon('filter', 14), assigneeSelect, tagSelect);
+  }
+
   function renderHead() {
     head.textContent = '';
+    const boardMenuBtn = el('button', { class: 'btn small icon-only', title: 'Меню дошки', onclick: (e) => { e.stopPropagation(); boardMenu(boardMenuBtn); } }, icon('more', 14));
+    const viewBtn = (key, label) => el('button', {
+      class: `btn small${view === key ? ' active' : ''}`, onclick: () => { view = key; renderBody(); },
+    }, label);
     head.append(el('div', { class: 'row', style: 'align-items:center;gap:8px;flex-wrap:wrap' },
       el('a', { href: `#/space/${space.id}`, style: 'display:inline-flex;align-items:center;gap:4px;font-size:12.5px' },
         icon('chevronLeft', 13), space.name),
       el('b', { style: 'font-size:16px' }, board.name),
+      el('div', { class: 'tabs', style: 'margin:0' }, viewBtn('board', withIcon('grid', 'Дошка')), viewBtn('list', withIcon('fileText', 'Список'))),
       el('div', { style: 'flex:1 1 auto' }),
-      canEdit ? el('button', {
-        class: 'btn small icon-only', title: 'Перейменувати дошку',
-        onclick: () => {
-          const input = el('input', { value: board.name });
-          const m = modal('Назва дошки', el('div', { class: 'field' }, el('label', {}, 'Назва'), input),
-            [actionButton('Зберегти', async () => {
-              if (!input.value.trim()) return toast('Потрібна назва', true);
-              await api.put(`/task_boards/${boardId}`, { name: input.value.trim() });
-              board.name = input.value.trim();
-              m.remove(); renderHead();
-            })]);
-        },
-      }, icon('edit', 14)) : null,
-      canDelete ? el('button', {
-        class: 'btn small icon-only danger', title: 'Видалити дошку',
-        onclick: async () => {
-          if (!confirm(`Видалити дошку «${board.name}»?`)) return;
-          try { await api.del(`/task_boards/${boardId}`); location.hash = `#/space/${space.id}`; }
-          catch (e) { toast(e.message, true); }
-        },
-      }, icon('trash', 14)) : null));
+      renderFilters(),
+      boardMenuBtn));
   }
 
   async function reload() {
-    activeIntervals.forEach(clearInterval); activeIntervals = [];
     const res = await api.get(`/task_boards/${boardId}`);
-    space = res.space; board = res.board; members = res.members; boardTags = res.boardTags;
+    space = res.space; board = res.board; members = res.members; boardTags = res.boardTags; rawColumns = res.columns;
     renderHead();
+    renderBody();
+  }
+
+  function renderBody() {
+    activeIntervals.forEach(clearInterval); activeIntervals = [];
     kanban.textContent = '';
-    kanban.append(...res.columns.map(renderColumn), addColumnTile());
+    kanban.classList.toggle('kanban-list-mode', view === 'list');
+    const columns = filteredColumns();
+    if (view === 'list') kanban.append(renderListView(columns));
+    else kanban.append(...columns.map(renderColumn), addColumnTile());
   }
 
   // ── Нова колонка — плитка праворуч від останньої, а не кнопка в шапці
@@ -785,32 +985,96 @@ export async function renderTaskBoard(boardId) {
     }
     renderRows();
 
+    let cleanup = () => {};
     async function save() {
       const title = titleInput.value.trim();
       if (!title) { titleInput.focus(); return; }
       try {
         await api.post(`/task_boards/${boardId}/cards`, { column_id: col.id, title, ...draft });
-        onDone(true);
+        cleanup(); onDone(true);
       } catch (e) { toast(e.message, true); }
     }
     titleInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); save(); }
-      if (e.key === 'Escape') onDone(false);
+      if (e.key === 'Escape') { cleanup(); onDone(false); }
     });
 
+    // Заголовок на всю ширину зверху, «Зберегти» — на всю ширину знизу
+    // (не поряд із заголовком); клік поза формою згортає її назад до
+    // кнопки-тригера без збереження — але клік усередині відкритого
+    // попапу вибору (він рендериться в body, поза цим box) не рахується
+    // «поза формою». ─────────────────────────────────────────────────
     const box = el('div', { class: 'quick-add-box' },
-      el('div', { class: 'quick-add-title-row' }, titleInput,
-        el('button', { class: 'btn small primary', onclick: save }, 'Зберегти ↵')),
-      rowsWrap);
+      titleInput, rowsWrap,
+      el('button', { class: 'btn primary quick-add-save', onclick: save }, 'Зберегти'));
+    const outsideClick = (e) => {
+      if (box.contains(e.target) || e.target.closest?.('.task-popover')) return;
+      cleanup(); onDone(false);
+    };
+    cleanup = () => document.removeEventListener('mousedown', outsideClick);
+    setTimeout(() => document.addEventListener('mousedown', outsideClick), 0);
     setTimeout(() => titleInput.focus(), 0);
     return box;
   }
 
+  // ── Список — ті самі колонки й картки, що на дошці, тільки згруповані
+  // таблицею замість карток-плиток (як у референсі). ──────────────────────
+  function renderListRow(c, hex) {
+    const p = priorityOf(c.priority);
+    const m = members.find((mm) => mm.user_id === c.assignee_user_id);
+    const priorityIcon = c.priority ? icon('flag', 13) : null;
+    if (priorityIcon) priorityIcon.style.color = p.color;
+    const row = el('div', { class: 'list-row' },
+      el('span', { class: 'list-col-name with-icon' }, el('span', { style: `color:${hex}` }, icon('checkCircle', 15)), c.title),
+      m ? el('span', { class: 'with-icon' }, avatarEl(m.name, m.user_id, 18), m.name) : el('span', { class: 'muted' }, '—'),
+      c.due_date ? el('span', { class: 'list-due' }, c.due_date) : el('span', { class: 'muted' }, '—'),
+      c.priority ? el('span', { class: 'with-icon' }, priorityIcon, p.label) : el('span', { class: 'muted' }, '—'),
+      el('span', { class: 'muted' }, c.total_seconds ? formatSeconds(c.total_seconds) : '—'));
+    row.addEventListener('click', () => openTaskCard(c.id, reload));
+    return row;
+  }
+
+  function renderListView(columns) {
+    const wrap = el('div', { class: 'list-view' });
+    columns.forEach((col) => {
+      const hex = tagColorHex(col.color);
+      wrap.append(el('div', { class: 'list-group-head' },
+        el('button', {
+          class: 'btn small icon-only', title: col.collapsed ? 'Розгорнути' : 'Згорнути', onclick: () => toggleCollapse(col),
+        }, icon(col.collapsed ? 'chevronRight' : 'chevronDown', 13)),
+        el('span', { class: 'list-group-badge', style: `background:${hex}` }, icon('checkCircle', 13), col.name),
+        el('span', { class: 'muted', style: 'font-size:12.5px' }, String(col.cards.length))));
+      if (col.collapsed) return;
+
+      wrap.append(el('div', { class: 'list-table' },
+        el('div', { class: 'list-row list-table-head' },
+          el('span', { class: 'list-col-name' }, 'Назва'), el('span', {}, 'Виконавець'),
+          el('span', {}, 'Дедлайн'), el('span', {}, 'Пріоритет'), el('span', {}, 'Час')),
+        ...col.cards.map((c) => renderListRow(c, hex))));
+
+      const addWrap = el('div', { style: 'padding:6px 10px 14px' });
+      function showTrigger() {
+        addWrap.textContent = '';
+        if (canCreate) addWrap.append(el('button', { class: 'btn small', onclick: () => showForm() }, withIcon('plus', 'Додати задачу')));
+      }
+      function showForm() {
+        addWrap.textContent = '';
+        addWrap.append(buildQuickAdd(col, (created) => { showTrigger(); if (created) reload(); }));
+      }
+      showTrigger();
+      wrap.append(addWrap);
+    });
+    return wrap;
+  }
+
   function renderColumn(col) {
     const hex = tagColorHex(col.color);
+    // Легкий відтінок кольору колонки на весь її фон (не лише пігулка
+    // заголовка) — color-mix поверх звичайного --panel-2, щоб тема не ламалась.
+    const tintBg = `background: color-mix(in srgb, ${hex} 10%, var(--panel-2))`;
 
     if (col.collapsed) {
-      const column = el('div', { class: 'kanban-col collapsed', 'data-column-id': col.id, 'data-order': col.board_order },
+      const column = el('div', { class: 'kanban-col collapsed', 'data-column-id': col.id, 'data-order': col.board_order, style: tintBg },
         el('div', { class: 'kanban-col-collapsed-head', draggable: canEdit ? 'true' : 'false' },
           el('button', { class: 'btn small icon-only', title: 'Розгорнути', onclick: () => toggleCollapse(col) }, icon('chevronRight', 13))),
         el('div', { class: 'kanban-col-collapsed-title', style: `color:${hex}` }, col.name),
@@ -840,7 +1104,7 @@ export async function renderTaskBoard(boardId) {
     }
     showTrigger();
 
-    const column = el('div', { class: 'kanban-col', 'data-column-id': col.id, 'data-order': col.board_order },
+    const column = el('div', { class: 'kanban-col', 'data-column-id': col.id, 'data-order': col.board_order, style: tintBg },
       headRow, cards, addWrap);
 
     headRow.addEventListener('dragstart', (e) => {
@@ -1010,6 +1274,10 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       el('div', { class: 'task-field-label' }, icon(iconName, 14), label),
       el('div', { class: 'task-field-value' }, valueNode));
   }
+  // Дати — на всю ширину рядка (два native date input поруч потребують
+  // більше місця, ніж половина рядка при поділі на дві клітинки; звідси й
+  // був баг із датою, що вилазила за межі). ──────────────────────────────
+  function fieldRowFull(iconName, label, valueNode) { return el('div', { class: 'task-field-row' }, fieldCell(iconName, label, valueNode)); }
 
   function render() {
     const { card, space, board, columns, members, attachments, comments, tags, boardTags, timeEntries, activity, runningTimer, totalSeconds } = d;
@@ -1022,10 +1290,9 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       class: 'task-title', value: card.title,
       onblur: () => titleInput.value.trim() && titleInput.value.trim() !== card.title && patch({ title: titleInput.value.trim() }),
     });
-    const statusSelect = el('select', {
-      class: 'task-status-select',
-      onchange: () => api.post(`/task_cards/${cardId}/move`, { column_id: Number(statusSelect.value) }).then(refresh).then(onChange),
-    }, ...columns.map((c) => el('option', { value: c.id, selected: c.id === card.column_id ? true : null }, c.name)));
+    const statusField = buildStatusField(card, columns, (columnId) => {
+      api.post(`/task_cards/${cardId}/move`, { column_id: columnId }).then(refresh).then(onChange).catch((e) => toast(e.message, true));
+    });
 
     const datesCell = buildDatesField(card, patch);
     const assigneeField = buildAssigneeField(card, members, patch);
@@ -1074,19 +1341,31 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       fileInput.value = '';
     });
 
+    const cardMenuBtn = el('button', { class: 'btn small icon-only', title: 'Меню задачі' }, icon('more', 14));
+    cardMenuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openPopover(cardMenuBtn, (box2) => {
+        box2.append(canDelete ? el('div', {
+          class: 'task-popover-item danger',
+          onclick: async () => {
+            box2.remove();
+            if (!confirm('Видалити картку?')) return;
+            try { await api.del(`/task_cards/${cardId}`); closeModal(); onChange(); }
+            catch (e2) { toast(e2.message, true); }
+          },
+        }, icon('trash', 13), 'Видалити задачу') : el('div', { class: 'muted', style: 'padding:6px 8px;font-size:12px' }, 'Немає доступних дій'));
+      });
+    });
     const main = el('div', { class: 'task-drawer-main' },
       el('div', { class: 'row', style: 'align-items:center;gap:8px' },
         el('div', { class: 'task-drawer-crumb', style: 'flex:1 1 auto' }, [space?.name, board?.name].filter(Boolean).join(' / ')),
-        canDelete ? el('button', {
-          class: 'btn small icon-only danger', title: 'Видалити картку',
-          onclick: async () => { if (!confirm('Видалити картку?')) return; await api.del(`/task_cards/${cardId}`); closeModal(); onChange(); },
-        }, icon('trash', 14)) : null,
-        el('button', { class: 'btn small icon-only', onclick: closeModal }, icon('close', 14))),
+        cardMenuBtn),
       titleInput,
       el('div', { class: 'task-field-table' },
-        fieldRow(fieldCell('dot', 'Статус', statusSelect), fieldCell('user', 'Виконавець', assigneeField)),
-        fieldRow(fieldCell('calendar', 'Дати', datesCell), fieldCell('flag', 'Пріоритет', priorityField)),
-        fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('tag', 'Теги', tagsField))),
+        fieldRow(fieldCell('dot', 'Статус', statusField), fieldCell('user', 'Виконавець', assigneeField)),
+        fieldRowFull('calendar', 'Дати', datesCell),
+        fieldRow(fieldCell('flag', 'Пріоритет', priorityField), fieldCell('tag', 'Теги', tagsField)),
+        fieldRowFull('clock', 'Трекер часу', timerCell)),
       descArea,
       el('div', { class: 'task-attach-list' },
         ...attachments.map((a) => fileChip(a, canDelete ? async () => { await api.del(`/task_attachments/${a.id}`); await refresh(); } : null))),
@@ -1094,7 +1373,9 @@ export async function openTaskCard(cardId, onChange = () => {}) {
 
     // ── Права частина: Activity + коментарі ────────────────────────────
     const feedItems = [
-      ...activity.map((a) => {
+      // 'commented' — той самий факт, що й comments.map нижче вже показує
+      // повною бульбашкою; окремий пункт в Activity був би дублем.
+      ...activity.filter((a) => a.kind !== 'commented').map((a) => {
         const p = a.payload ? JSON.parse(a.payload) : {};
         const clickable = (a.kind === 'time_started' || a.kind === 'time_stopped') && p.entry_id;
         const textNode = el('div', clickable ? { class: 'activity-clickable', title: 'Редагувати запис часу', onclick: () => editTimeEntry(p.entry_id) } : {}, activityText(a));
@@ -1103,7 +1384,7 @@ export async function openTaskCard(cardId, onChange = () => {}) {
           el('div', { class: 'activity-body' }, textNode, el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(a.created_at)))) };
       }),
       ...comments.map((c) => ({ created_at: c.created_at, node: el('div', { class: 'activity-item comment' },
-        el('div', { class: 'activity-bullet' }),
+        avatarEl(c.user_name || '?', c.user_id, 22),
         el('div', { class: 'activity-body' },
           el('div', {}, el('b', {}, c.user_name || 'Хтось'), ': ', c.body),
           c.attachments.length ? el('div', { style: 'margin-top:4px;display:flex;flex-direction:column;gap:2px' }, ...c.attachments.map((a) => fileChip(a))) : null,
