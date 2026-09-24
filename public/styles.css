@@ -245,11 +245,11 @@ label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px
 }
 .list-table { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .list-row {
-  display: grid; grid-template-columns: 2fr 1fr 110px 130px 100px; gap: 10px; align-items: center;
-  padding: 9px 14px; border-top: 1px solid var(--line); font-size: 13px; cursor: pointer;
+  display: grid; grid-template-columns: 2fr 1fr 110px 130px 1fr 100px; gap: 10px; align-items: center;
+  padding: 9px 14px; border-top: 1px solid var(--line); font-size: 13px;
 }
 .list-row:first-child { border-top: none; }
-.list-table-head { cursor: default; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; background: var(--panel-2); }
+.list-table-head { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; background: var(--panel-2); }
 .list-row:not(.list-table-head):hover { background: var(--panel-2); }
 .list-col-name { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .list-due { color: var(--accent-2); }
@@ -715,6 +715,14 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 }
 .task-popover-item:hover { background: var(--panel-2); }
 
+/* Спливна підказка по утриманню наведення (>1с) — напр. пояснення
+   пріоритетів; рендериться в body, під елементом, ширина обмежена. */
+.hold-tooltip {
+  position: fixed; z-index: 210; max-width: 240px; padding: 8px 10px; font-size: 12px; line-height: 1.4;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .24);
+  color: var(--text); animation: task-ai-panel-in .12s ease-out;
+}
+
 /* Теги — кольорові чипи в клітинці картки й у чекліст-рядках попапу. */
 .task-tags-value { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 24px; cursor: pointer; padding: 3px 4px; border-radius: 6px; }
 .task-tags-value:hover { background: var(--panel-2); }
@@ -1051,6 +1059,11 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
 }
 .task-sidebar-board-row:hover { background: var(--panel-2); }
 .task-sidebar-board-row.active { background: var(--accent-soft); font-weight: 600; }
+.task-sidebar-add-board-btn {
+  display: flex; align-items: center; gap: 6px; padding: 5px 4px 5px 22px; margin-top: 2px; border: none;
+  background: transparent; color: var(--muted); font-size: 12.5px; border-radius: 7px; cursor: pointer; width: 100%; text-align: left;
+}
+.task-sidebar-add-board-btn:hover { background: var(--panel-2); color: var(--text); }
 .task-sidebar-board-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-sidebar-board-icon {
   width: 18px; height: 18px; flex: 0 0 18px; padding: 0; border: none; background: transparent; color: var(--muted);

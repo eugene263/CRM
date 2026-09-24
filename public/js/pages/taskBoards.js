@@ -13,13 +13,35 @@ import { icon, withIcon } from '../icons.js';
 // «нема» до червоного «терміново». Той самий колір, що на канві дошки,
 // що в картці.
 const PRIORITIES = [
-  { value: '', label: 'Немає', color: '#8d95ab' },
-  { value: 'low', label: 'Низький', color: '#748ffc' },
-  { value: 'medium', label: 'Середній', color: '#f2b705' },
-  { value: 'high', label: 'Високий', color: '#e8590c' },
-  { value: 'urgent', label: 'Терміново', color: '#e03131' },
+  { value: '', label: 'Немає', color: '#8d95ab', info: 'Без пріоритету — виконується в останню чергу, після пріоритетніших задач.' },
+  { value: 'low', label: 'Низький', color: '#748ffc', info: 'Низький пріоритет — протягом тижня.' },
+  { value: 'medium', label: 'Середній', color: '#f2b705', info: 'Середній пріоритет — 2-3 дні.' },
+  { value: 'high', label: 'Високий', color: '#e8590c', info: 'Високий пріоритет — сьогодні або завтра.' },
+  { value: 'urgent', label: 'Терміново', color: '#e03131', info: 'Терміновий пріоритет — виконується за кілька годин, максимум цього ж дня.' },
 ];
 const priorityOf = (v) => PRIORITIES.find((p) => p.value === (v || '')) || PRIORITIES[0];
+
+// Спливна підказка по УТРИМАННЮ наведення (>1с, не миттєво — щоб не
+// заважати звичайному швидкому проглядy) — невелика плашка під елементом.
+function attachHoldTooltip(target, getText) {
+  let timer = null;
+  let tip = null;
+  const hide = () => { clearTimeout(timer); timer = null; tip?.remove(); tip = null; };
+  target.addEventListener('mouseenter', () => {
+    timer = setTimeout(() => {
+      const text = typeof getText === 'function' ? getText() : getText;
+      if (!text) return;
+      tip = el('div', { class: 'hold-tooltip' }, text);
+      document.body.append(tip);
+      const r = target.getBoundingClientRect();
+      const left = Math.min(r.left, window.innerWidth - tip.offsetWidth - 8);
+      tip.style.left = `${Math.max(8, left)}px`;
+      tip.style.top = `${r.bottom + 6}px`;
+    }, 1000);
+  });
+  target.addEventListener('mouseleave', hide);
+  target.addEventListener('mousedown', hide);
+}
 
 // Кольори тегів — та сама палітра, що вже прижилась у мапах клієнта
 // (ITEM_COLORS): один впізнаваний набір кольорів по всій CRM.
@@ -189,12 +211,15 @@ function buildPriorityField(card, onSet, { compact = false } = {}) {
   const ic = icon('flag', 14); ic.style.color = p.color;
   btn.append(ic);
   if (!compact) btn.append(el('span', {}, p.label));
+  attachHoldTooltip(btn, () => priorityOf(card.priority).info);
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     openPopover(btn, (box2) => {
       box2.append(...PRIORITIES.map((pp) => {
         const ic2 = icon('flag', 14); ic2.style.color = pp.color;
-        return el('div', { class: 'task-popover-item', onclick: () => { onSet({ priority: pp.value || null }); box2.remove(); } }, ic2, pp.label);
+        const item = el('div', { class: 'task-popover-item', onclick: () => { onSet({ priority: pp.value || null }); box2.remove(); } }, ic2, pp.label);
+        attachHoldTooltip(item, pp.info);
+        return item;
       }));
     });
   });
@@ -1114,8 +1139,18 @@ export async function renderTaskBoard(boardId) {
   // для AI, коли вона оцінює estimate за описом (кнопка-іскорка біля поля
   // Estimate). Рядки редагуються прямо в модалці, порожні відкидаються при
   // збереженні (те саме робить і бек, це — підстраховка на клієнті).
+  // Кілька найпоширеніших типів задач — щоб не стартувати з порожнього
+  // списку: підставляються лише як ЧОРНОВИК у формі (нічого не зберігається,
+  // поки не натиснути «Зберегти»), людина може відредагувати чи прибрати.
+  const DEFAULT_ESTIMATE_NORMS = [
+    { label: 'Ресерч', hours: 2 },
+    { label: 'Створення акаунта', hours: 0.5 },
+    { label: 'Прогрів акаунта', hours: 1 },
+    { label: 'Публікація контенту', hours: 0.5 },
+    { label: 'Виправлення бага', hours: 1.5 },
+  ];
   function openEstimateNormsModal() {
-    const initial = board.estimate_norms && board.estimate_norms.length ? board.estimate_norms : [{ label: '', hours: 0 }];
+    const initial = board.estimate_norms && board.estimate_norms.length ? board.estimate_norms : DEFAULT_ESTIMATE_NORMS;
     const rows = [];
     const list = el('div', { class: 'estimate-norms-list' });
     const addRow = (row = { label: '', hours: 0 }) => {
@@ -1606,18 +1641,25 @@ export async function renderTaskBoard(boardId) {
   // ── Список — ті самі колонки й картки, що на дошці, тільки згруповані
   // таблицею замість карток-плиток (як у референсі). ──────────────────────
   function renderListRow(c, hex) {
-    const p = priorityOf(c.priority);
-    const m = members.find((mm) => mm.user_id === c.assignee_user_id);
-    const priorityIcon = c.priority ? icon('flag', 13) : null;
-    if (priorityIcon) priorityIcon.style.color = p.color;
-    const row = el('div', { class: 'list-row' },
-      el('span', { class: 'list-col-name with-icon' }, el('span', { style: `color:${hex}` }, icon('checkCircle', 15)), c.title),
-      m ? el('span', { class: 'with-icon' }, avatarEl(m.name, m.user_id, 18), m.name) : el('span', { class: 'muted' }, '—'),
-      c.due_date ? el('span', { class: 'list-due' }, c.due_date) : el('span', { class: 'muted' }, '—'),
-      c.priority ? el('span', { class: 'with-icon' }, priorityIcon, p.label) : el('span', { class: 'muted' }, '—'),
+    // Виконавець/дедлайн/пріоритет/теги — ті самі інтерактивні віджети, що
+    // й на плитці картки дошки (не статичний текст): клік по кожному з них
+    // відкриває свій попап без відкриття картки. Картку відкриває ЛИШЕ
+    // клік по самій назві.
+    const miniPatch = async (fields) => {
+      try { await api.put(`/task_cards/${c.id}`, fields); await reload(); }
+      catch (e) { toast(e.message, true); }
+    };
+    const tagsApply = async (ids) => { await api.put(`/task_cards/${c.id}/tags`, { tag_ids: ids }); await reload(); };
+    const nameCell = el('span', { class: 'list-col-name with-icon', style: 'cursor:pointer' },
+      el('span', { style: `color:${hex}` }, icon('checkCircle', 15)), c.title);
+    nameCell.addEventListener('click', (e) => { e.stopPropagation(); openTaskCard(c.id, reload); });
+    return el('div', { class: 'list-row' },
+      nameCell,
+      buildAssigneeField(c, members, miniPatch, { size: 18, compact: true }),
+      buildDatesField(c, miniPatch, { compact: true }),
+      buildPriorityField(c, miniPatch, { compact: true }),
+      buildTagsField(c.tags || [], boardTags, board.id, tagsApply, reload, { compact: true }),
       el('span', { class: 'muted' }, c.total_seconds ? formatSeconds(c.total_seconds) : '—'));
-    row.addEventListener('click', () => openTaskCard(c.id, reload));
-    return row;
   }
 
   function renderListView(columns) {
@@ -1635,7 +1677,7 @@ export async function renderTaskBoard(boardId) {
       wrap.append(el('div', { class: 'list-table' },
         el('div', { class: 'list-row list-table-head' },
           el('span', { class: 'list-col-name' }, 'Назва'), el('span', {}, 'Виконавець'),
-          el('span', {}, 'Дедлайн'), el('span', {}, 'Пріоритет'), el('span', {}, 'Час')),
+          el('span', {}, 'Дедлайн'), el('span', {}, 'Пріоритет'), el('span', {}, 'Теги'), el('span', {}, 'Час')),
         ...col.cards.map((c) => renderListRow(c, hex))));
 
       const addWrap = el('div', { style: 'padding:6px 10px 14px' });
@@ -1943,12 +1985,19 @@ export async function renderTaskBoard(boardId) {
         class: 'task-sidebar-logo-btn', type: 'button', title: canEdit ? 'Змінити лого простору' : s.name,
         onclick: (e) => { e.stopPropagation(); if (canEdit) uploadSpaceLogo(s); },
       }, s.logo_data_url ? el('img', { src: s.logo_data_url, class: 'task-sidebar-logo-img small' }) : el('span', { class: 'task-sidebar-logo-fallback' }, initials(s.name)));
+      // Доступ до простору — членство в task_space_members керує доступом
+      // до ВСІХ дошок цього простору (окремого ACL per-дошка в моделі
+      // даних нема), тож «налаштувати доступ до дошок» = редагувати тут.
+      const accessBtn = canEdit ? el('button', {
+        class: 'task-sidebar-board-icon', type: 'button', title: 'Доступ до простору',
+        onclick: (e) => { e.stopPropagation(); openSpaceAccessPopover(accessBtn, s); },
+      }, icon('users', 13)) : null;
       const spaceRow = el('div', {
         class: 'task-sidebar-space-row', onclick: () => {
           if (isOpen) expanded.delete(s.id); else expanded.add(s.id);
           setExpandedSpaceIds(expanded); renderSidebar();
         },
-      }, icon(isOpen ? 'chevronDown' : 'chevronRight', 12), logoBtn, el('span', { class: 'task-sidebar-space-name' }, s.name));
+      }, icon(isOpen ? 'chevronDown' : 'chevronRight', 12), logoBtn, el('span', { class: 'task-sidebar-space-name' }, s.name), accessBtn);
       list.append(spaceRow);
       if (!isOpen) return;
       s.members?.length ? list.append(el('div', { class: 'task-sidebar-members' },
@@ -1962,6 +2011,68 @@ export async function renderTaskBoard(boardId) {
           href: `#/board/${b.id}`, class: `task-sidebar-board-row${b.id === boardId ? ' active' : ''}`,
         }, iconBtn, el('span', { class: 'task-sidebar-board-name' }, b.name), el('span', { class: 'muted', style: 'font-size:11px' }, String(b.card_count))));
       });
+      if (canCreate) {
+        list.append(el('button', {
+          class: 'task-sidebar-add-board-btn', type: 'button', title: 'Нова дошка в цьому просторі',
+          onclick: (e) => {
+            e.stopPropagation();
+            const input = el('input', { placeholder: 'Назва дошки' });
+            const m = modal('Нова дошка', el('div', { class: 'field' }, el('label', {}, 'Назва'), input),
+              [actionButton('Створити', async () => {
+                if (!input.value.trim()) return toast('Потрібна назва', true);
+                try {
+                  const { id } = await api.post(`/task_spaces/${s.id}/boards`, { name: input.value.trim() });
+                  m.remove();
+                  location.hash = `#/board/${id}`;
+                } catch (err) { toast(err.message, true); }
+              })]);
+          },
+        }, icon('plus', 12), 'Нова дошка'));
+      }
+    });
+  }
+
+  // Попап керування доступом до простору (а отже — до всіх його дошок):
+  // додати/прибрати учасника; той самий /task_spaces/:id/members API, що
+  // й на сторінці простору, тільки без переходу з дошки.
+  function openSpaceAccessPopover(anchor, s) {
+    openPopover(anchor, (box2) => {
+      box2.style.minWidth = '240px';
+      function render() {
+        box2.textContent = '';
+        box2.append(el('div', { style: 'font-weight:600;font-size:12.5px;padding:4px 6px 8px' }, `Доступ: ${s.name}`));
+        (s.members || []).forEach((m) => {
+          box2.append(el('div', { class: 'task-popover-item' },
+            el('div', { class: 'with-icon', style: 'flex:1 1 auto' }, icon('user', 13), m.name),
+            el('button', {
+              class: 'btn small icon-only danger', type: 'button', title: 'Прибрати доступ',
+              onclick: async (e) => {
+                e.stopPropagation();
+                try {
+                  await api.del(`/task_spaces/${s.id}/members/${m.user_id}`);
+                  s.members = (s.members || []).filter((mm) => mm.user_id !== m.user_id);
+                  render();
+                } catch (err) { toast(err.message, true); }
+              },
+            }, icon('trash', 11))));
+        });
+        const memberIds = new Set((s.members || []).map((m) => m.user_id));
+        const options = (state.refs.users || []).filter((u) => !memberIds.has(u.id));
+        const select = el('select', { style: 'margin-top:6px;width:100%' }, el('option', { value: '' }, 'надати доступ…'),
+          ...options.map((u) => el('option', { value: u.id }, u.label)));
+        select.addEventListener('click', (e) => e.stopPropagation());
+        select.addEventListener('change', async () => {
+          if (!select.value) return;
+          const { id, label } = options.find((u) => String(u.id) === select.value);
+          try {
+            await api.post(`/task_spaces/${s.id}/members`, { user_id: id });
+            s.members = [...(s.members || []), { user_id: id, name: label }];
+            render();
+          } catch (err) { toast(err.message, true); }
+        });
+        box2.append(select);
+      }
+      render();
     });
   }
 
@@ -2405,8 +2516,8 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       el('div', { class: 'task-field-table' },
         fieldRow(fieldCell('dot', 'Статус', statusField), fieldCell('user', 'Виконавець', assigneeField)),
         fieldRow(fieldCell('calendar', 'Дати', datesCell), fieldCell('flag', 'Пріоритет', priorityField)),
-        fieldRow(fieldCell('idCard', 'Автор', authorField), fieldCell('gauge', 'Estimate', estimateField)),
-        fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('tag', 'Теги', tagsField))));
+        fieldRow(fieldCell('gauge', 'Estimate', estimateField), fieldCell('tag', 'Теги', tagsField)),
+        fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('idCard', 'Автор', authorField))));
     const scroll = el('div', { class: 'task-drawer-scroll' },
       descHeader,
       descArea,
