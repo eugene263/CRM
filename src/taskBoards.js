@@ -13,6 +13,7 @@
 // analyst) бачать усі простори, решта — лише ті, куди їх додали.
 import { all, get, run, insert } from './db.js';
 import { scopeOf } from './rbac.js';
+import { hasGeminiKeys, geminiText } from './ai.js';
 
 export const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
@@ -453,6 +454,54 @@ export async function updateCard(user, cardId, patch) {
     await autoMoveOnStartDate(cardId, boardId, columnId, user.id);
   }
   return { ok: true };
+}
+
+// AI-генерація опису задачі з її назви (+ необов'язкові уточнення від
+// автора й рівень деталізації) — той самий Gemini-клієнт з ротацією
+// ключів, що й AI-чат (ai.js), з ANTHROPIC_API_KEY як платним резервом,
+// коли Gemini не налаштовано (той самий підхід, що й aiSearchCandidates
+// у prospecting.js). Повертає ЛИШЕ текст — блоками опису його розкладає
+// вже фронтенд (переносить рядки в окремі paragraph-блоки).
+async function callAnthropicPlain(apiKey, prompt) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 1200, messages: [{ role: 'user', content: prompt }] }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw Object.assign(new Error(`AI: помилка Anthropic API (${res.status}): ${text.slice(0, 300)}`), { status: 502 });
+  }
+  const data = await res.json();
+  return (data.content || []).map((c) => c.text || '').join('');
+}
+
+const AI_DESC_DETAIL = {
+  brief: 'Дуже коротко: 1-2 речення, тільки суть без деталей.',
+  standard: 'Стандартно: короткий вступ на 1-2 речення й 2-4 пункти головних кроків або вимог.',
+  detailed: 'Детально: розгорнутий опис, чіткі кроки виконання, критерії готовності (definition of done), можливі нюанси й ризики.',
+};
+
+export async function generateCardDescription(user, cardId, { notes, detail } = {}) {
+  const { board_id: boardId } = await cardRow(cardId);
+  const spaceId = await spaceIdOfBoard(boardId);
+  await assertMember(user, spaceId);
+  const card = await get('SELECT title FROM task_cards WHERE id=?', cardId);
+  const detailKey = AI_DESC_DETAIL[detail] ? detail : 'standard';
+  const prompt = [
+    'Ти — помічник, що пише короткі ділові описи задач для команди в робочому таск-трекері, українською мовою, без зайвої води й без markdown-розмітки (без зірочок, без заголовків на кшталт «Опис:»).',
+    `Назва задачі: "${card.title}"`,
+    notes ? `Додаткові побажання автора: ${String(notes).slice(0, 1000)}` : null,
+    AI_DESC_DETAIL[detailKey],
+    'Виведи ЛИШЕ готовий текст опису — його вставлять прямо в поле опису задачі.',
+  ].filter(Boolean).join('\n');
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (!hasGeminiKeys() && !anthropicKey) {
+    throw Object.assign(new Error('AI-генерація не налаштована: додайте GEMINI_API_KEY(S) або ANTHROPIC_API_KEY'), { status: 400 });
+  }
+  const text = hasGeminiKeys() ? await geminiText(prompt) : await callAnthropicPlain(anthropicKey, prompt);
+  return { text: text.trim() };
 }
 
 // Перетягнули картку саме в колонку «В роботі» — трекер часу того, хто

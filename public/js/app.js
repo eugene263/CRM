@@ -220,7 +220,7 @@ async function route() {
     view.append(node);
     $('#page-title').textContent = section === 'e' ? (state.meta[arg]?.label || 'Розділ')
       : { analytics: 'Аналітика', finance: 'Фінанси', profile: 'Профіль', roles: 'Ролі та права', prospecting: 'Пошук клієнтів', plans: 'Плани та норми', list: 'Список пошуку',
-        template: 'Шаблони повідомлень', map: 'Підключення клієнта', space: 'Простір задач', board: 'Дошка задач' }[section] || 'Дашборд';
+        template: 'Шаблони повідомлень', map: 'Підключення клієнта', space: 'Задачі', board: 'Задачі' }[section] || 'Дашборд';
   } catch (err) {
     view.textContent = '';
     view.append(el('div', { class: 'card' }, el('div', { class: 'error' }, err.message)));

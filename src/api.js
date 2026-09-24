@@ -1096,6 +1096,14 @@ export async function handleApi(req, res, url) {
       const body = await readBody(req);
       return ok(res, await taskBoards.setCardTags(user, cardId, body.tag_ids));
     }
+    if (seg[2] === 'generate_description' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати картку');
+      if (!rateLimit(`task-ai-desc:${user.id}`, 15, 5 * 60_000)) {
+        return fail(res, 429, 'Забагато запитів до AI-генерації, спробуйте за кілька хвилин');
+      }
+      const body = await readBody(req);
+      return ok(res, await taskBoards.generateCardDescription(user, cardId, body));
+    }
     return fail(res, 405, 'Метод не підтримується');
   }
   if (seg[0] === 'task_comments' && seg[1] && req.method === 'DELETE') {

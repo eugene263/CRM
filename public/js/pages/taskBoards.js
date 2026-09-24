@@ -851,7 +851,7 @@ export async function renderTaskSpace(spaceId) {
     head.textContent = '';
     head.append(el('div', { class: 'row', style: 'align-items:center;gap:8px' },
       el('a', { href: '#/e/task_spaces', style: 'display:inline-flex;align-items:center;gap:4px;font-size:12.5px' },
-        icon('chevronLeft', 13), 'Простори задач'),
+        icon('chevronLeft', 13), 'Задачі'),
       el('b', { style: 'font-size:16px' }, space.name),
       el('div', { style: 'flex:1 1 auto' }),
       canEdit ? el('button', {
@@ -1872,6 +1872,71 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       catch (e) { toast(e.message, true); }
     });
 
+    // ── AI-генерація опису: попап знизу картки (position:absolute bottom:0
+    // відносно .task-drawer — сам box має position:relative), закривається
+    // по надсиланню, і на його місці — мінімалістична анімація, поки йде
+    // запит; результат дописується в блоки опису (замінює єдиний порожній
+    // блок за замовчуванням або додається до наявного вмісту) і одразу
+    // видно через звичайний refresh(). ──────────────────────────────────
+    async function generateAiDescription({ notes, detail }) {
+      box.querySelector('.task-ai-loading')?.remove();
+      const loading = el('div', { class: 'task-ai-loading' }, icon('sparkles', 15), el('span', {}, 'Генерую опис…'));
+      box.append(loading);
+      try {
+        const res = await api.post(`/task_cards/${cardId}/generate_description`, { notes, detail });
+        const text = String(res.text || '').trim();
+        if (text) {
+          const newBlocks = text.split(/\n+/).map((line) => line.trim()).filter(Boolean).map((line) => ({ ...makeBlock('paragraph'), text: line }));
+          const current = card.description_blocks && card.description_blocks.length ? card.description_blocks : null;
+          const isSingleEmpty = current && current.length === 1 && current[0].type === 'paragraph'
+            && !String(current[0].text || '').replace(/<[^>]+>/g, '').trim();
+          const finalBlocks = (!current || isSingleEmpty) ? newBlocks : [...current, ...newBlocks];
+          await api.put(`/task_cards/${cardId}`, { description_blocks: finalBlocks });
+        }
+        await refresh();
+      } catch (e) { toast(e.message, true); }
+      finally { loading.remove(); }
+    }
+
+    function openAiDescPanel() {
+      box.querySelector('.task-ai-desc-panel')?.remove();
+      let detail = 'standard';
+      const panel = el('div', { class: 'task-ai-desc-panel' });
+      const doGenerate = () => {
+        const notes = notesInput.value.trim();
+        panel.remove();
+        generateAiDescription({ notes, detail });
+      };
+      const levelBtn = (key, label) => el('button', {
+        type: 'button', class: `task-ai-level-btn${detail === key ? ' active' : ''}`,
+        onclick: () => { detail = key; renderPanel(); },
+      }, label);
+      const notesInput = el('input', {
+        class: 'task-ai-desc-input', placeholder: 'Уточніть, що додати в опис (необов’язково)…',
+        onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); doGenerate(); } },
+      });
+      function renderPanel() {
+        panel.textContent = '';
+        panel.append(
+          el('div', { class: 'task-ai-desc-head' },
+            withIcon('sparkles', 'AI-опис задачі'), el('div', { style: 'flex:1 1 auto' }),
+            el('button', { class: 'btn small icon-only', type: 'button', onclick: () => panel.remove() }, icon('close', 13))),
+          el('div', { class: 'task-ai-desc-body' },
+            el('div', { class: 'task-ai-desc-row' },
+              el('div', { class: 'muted', style: 'font-size:12.5px;flex:1 1 auto' }, 'Опишу задачу на основі назви — можна одразу уточнити деталі нижче.'),
+              el('button', { class: 'btn primary small', type: 'button', onclick: doGenerate }, withIcon('sparkles', 'Згенерувати'))),
+            el('div', { class: 'task-ai-level-row' }, levelBtn('brief', 'Коротко'), levelBtn('standard', 'Стандартно'), levelBtn('detailed', 'Детально'))),
+          el('div', { class: 'task-ai-desc-input-row' },
+            notesInput,
+            el('button', { class: 'btn primary icon-only', type: 'button', title: 'Надіслати', onclick: doGenerate }, icon('send', 14))));
+      }
+      renderPanel();
+      box.append(panel);
+      notesInput.focus();
+    }
+    const aiDescBtn = el('button', { class: 'task-ai-desc-btn', type: 'button', title: 'Згенерувати опис через AI', onclick: openAiDescPanel }, icon('sparkles', 15));
+    const descHeader = el('div', { class: 'task-desc-header' }, el('span', { class: 'muted', style: 'font-size:12px' }, 'Опис'), el('div', { style: 'flex:1 1 auto' }), aiDescBtn);
+
     const fileInput = el('input', { type: 'file', style: 'display:none' });
     fileInput.addEventListener('change', async () => {
       const file = fileInput.files[0]; if (!file) return;
@@ -1911,6 +1976,7 @@ export async function openTaskCard(cardId, onChange = () => {}) {
         fieldRow(fieldCell('gauge', 'Estimate', estimateField), fieldCell('idCard', 'Автор', authorField)),
         fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('tag', 'Теги', tagsField))));
     const scroll = el('div', { class: 'task-drawer-scroll' },
+      descHeader,
       descArea,
       el('div', { class: 'task-attach-list' },
         ...attachments.map((a) => fileChip(a, canDelete ? async () => { await api.del(`/task_attachments/${a.id}`); await refresh(); } : null))),

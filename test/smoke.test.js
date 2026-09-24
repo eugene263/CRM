@@ -1976,6 +1976,26 @@ test('estimate_minutes редагується, логується й видно 
   assert.equal(cleared.data.card.estimate_minutes, null);
 });
 
+test('AI-генерація опису задачі без налаштованого ключа повертає зрозумілу помилку', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Налаштувати CI' } })).data;
+
+  // У тестовому середовищі жоден ключ не заданий — саме так і на проді,
+  // доки власник не додасть його в змінні середовища сервісу.
+  const res = await call(`/api/task_cards/${card.id}/generate_description`, {
+    method: 'POST', body: { detail: 'standard' },
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.data.error, /GEMINI_API_KEY/);
+  assert.match(res.data.error, /ANTHROPIC_API_KEY/);
+
+  assert.equal((await call(`/api/task_cards/${card.id}/generate_description`, {
+    method: 'POST', as: 'creator', body: {},
+  })).status, 403, 'creator не є учасником цього простору — і до AI-генерації опису теж');
+});
+
 test('призначення виконавця обмежене учасниками простору й логується окремо', async () => {
   const spaceId = await makeSpace();
   const boardId = await makeBoard(spaceId);

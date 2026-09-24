@@ -553,7 +553,7 @@ td.editable textarea { min-width: 220px; resize: vertical; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
   width: min(1100px, 96vw); height: min(800px, 90vh);
   box-shadow: 0 24px 60px rgba(0, 0, 0, .28);
-  display: flex; overflow: hidden;
+  display: flex; overflow: hidden; position: relative;
 }
 /* Поля картки (статус/дати/estimate/трекер...) завжди повністю видні
    зверху — не скролляться; скролиться лише .task-drawer-scroll (опис,
@@ -891,3 +891,48 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
 .cal-panel-task-row:hover { background: var(--panel-2); }
 .cal-panel-workload-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
 .cal-panel-workload-name { flex: 0 0 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── AI-генерація опису задачі — кнопка-іконка (✨) біля заголовка «Опис»,
+   попап знизу картки (a-la bottom sheet, закривається по надсиланню), і
+   мінімалістична анімація на його місці, поки триває генерація. ──────── */
+.task-desc-header { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.task-ai-desc-btn {
+  width: 28px; height: 28px; flex: 0 0 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--accent); cursor: pointer;
+}
+.task-ai-desc-btn:hover { border-color: var(--accent); }
+
+.task-ai-desc-panel {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 16;
+  background: var(--panel); border-top: 1px solid var(--line); border-radius: 0 0 16px 16px;
+  box-shadow: 0 -12px 30px rgba(0, 0, 0, .18);
+  display: flex; flex-direction: column;
+  animation: task-ai-panel-in .16s ease-out;
+}
+@keyframes task-ai-panel-in { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.task-ai-desc-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 600; }
+.task-ai-desc-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.task-ai-desc-row { display: flex; align-items: center; gap: 10px; }
+/* Три кнопки деталізації — гармонійно рівними частками в один рядок. */
+.task-ai-level-row { display: flex; gap: 6px; }
+.task-ai-level-btn {
+  flex: 1 1 0; padding: 7px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2);
+  color: var(--text); font-size: 12.5px; cursor: pointer; text-align: center; transition: border-color .12s, background .12s;
+}
+.task-ai-level-btn:hover { border-color: var(--accent); }
+.task-ai-level-btn.active { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.task-ai-desc-input-row { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.task-ai-desc-input { flex: 1 1 auto; }
+
+/* Мінімалістична анімація генерації — займає те саме місце знизу картки,
+   де щойно був попап (плавний shimmer-градієнт + обертова іскорка). */
+.task-ai-loading {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 15;
+  display: flex; align-items: center; gap: 8px; justify-content: center;
+  padding: 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted);
+  background: linear-gradient(90deg, var(--panel) 0%, var(--panel-2) 50%, var(--panel) 100%);
+  background-size: 200% 100%; animation: task-ai-shimmer 1.4s ease-in-out infinite;
+}
+.task-ai-loading .icon { color: var(--accent); animation: task-ai-spin 1.6s linear infinite; }
+@keyframes task-ai-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@keyframes task-ai-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
