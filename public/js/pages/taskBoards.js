@@ -2059,12 +2059,22 @@ export async function renderTaskBoard(boardId) {
         class: 'task-sidebar-board-icon', type: 'button', title: 'Доступ до простору',
         onclick: (e) => { e.stopPropagation(); openSpaceAccessPopover(accessBtn, s); },
       }, icon('users', 13)) : null;
-      const spaceRow = el('div', {
-        class: 'task-sidebar-space-row', onclick: () => {
+      // Дві РІЗНІ дії в одному рядку: шеврон розгортає/згортає список
+      // дошок (як і раніше), а сам клік по НАЗВІ простору відкриває
+      // дашборд аналітики (#/space/:id) — а не так само згортає.
+      const chevronBtn = el('button', {
+        class: 'task-sidebar-space-toggle', type: 'button', title: isOpen ? 'Згорнути список дошок' : 'Розгорнути список дошок',
+        onclick: (e) => {
+          e.stopPropagation();
           if (isOpen) expanded.delete(s.id); else expanded.add(s.id);
           setExpandedSpaceIds(expanded); renderSidebar();
         },
-      }, icon(isOpen ? 'chevronDown' : 'chevronRight', 12), logoBtn, el('span', { class: 'task-sidebar-space-name' }, s.name), accessBtn);
+      }, icon(isOpen ? 'chevronDown' : 'chevronRight', 12));
+      const nameSpan = el('span', {
+        class: 'task-sidebar-space-name', title: `Відкрити дашборд «${s.name}»`,
+        onclick: (e) => { e.stopPropagation(); location.hash = `#/space/${s.id}`; },
+      }, s.name);
+      const spaceRow = el('div', { class: 'task-sidebar-space-row' }, chevronBtn, logoBtn, nameSpan, accessBtn);
       list.append(spaceRow);
       if (!isOpen) return;
       s.boards.forEach((b) => {

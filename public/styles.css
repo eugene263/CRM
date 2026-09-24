@@ -1035,14 +1035,25 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
 .task-sidebar-list { display: flex; flex-direction: column; gap: 2px; width: 100%; }
 .task-sidebar.collapsed .task-sidebar-list { align-items: center; gap: 6px; }
 
-/* Розгорнутий стан — рядок простору (лого + назва + шеврон), дошки під ним. */
+/* Розгорнутий стан — рядок простору (лого + назва + шеврон), дошки під ним.
+   Шеврон і назва — окремі кнопки з РІЗНИМИ діями (шеврон згортає/розгортає
+   список дошок, назва відкриває дашборд аналітики), тож курсор і hover —
+   лише на них, не на всьому рядку. */
 .task-sidebar-space-row {
-  display: flex; align-items: center; gap: 6px; padding: 6px 4px; border-radius: 7px; cursor: pointer;
+  display: flex; align-items: center; gap: 6px; padding: 6px 4px; border-radius: 7px;
   font-size: 12.5px; font-weight: 600; margin-top: 6px;
 }
-.task-sidebar-space-row:hover { background: var(--panel-2); }
 .task-sidebar-space-row .icon { color: var(--muted); flex: 0 0 auto; }
-.task-sidebar-space-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-sidebar-space-toggle {
+  width: 18px; height: 18px; flex: 0 0 18px; padding: 0; border: none; background: transparent;
+  border-radius: 5px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.task-sidebar-space-toggle:hover { background: var(--panel-2); }
+.task-sidebar-space-name {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer; border-radius: 5px; padding: 2px 4px; margin: -2px -4px;
+}
+.task-sidebar-space-name:hover { background: var(--panel-2); text-decoration: underline; }
 .task-sidebar-logo-btn {
   width: 20px; height: 20px; flex: 0 0 20px; padding: 0; border: none; border-radius: 5px; background: transparent;
   cursor: pointer; display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
