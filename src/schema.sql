@@ -1109,6 +1109,7 @@ CREATE TABLE IF NOT EXISTS task_comments (
   card_id INTEGER NOT NULL REFERENCES task_cards(id) ON DELETE CASCADE,
   user_id INTEGER REFERENCES users(id),
   body TEXT NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_task_comments_card ON task_comments(card_id);

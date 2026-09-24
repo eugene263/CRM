@@ -1102,6 +1102,11 @@ export async function handleApi(req, res, url) {
     if (!can(user, 'task_spaces', 'delete')) return fail(res, 403, 'Немає прав видаляти коментарі');
     return ok(res, await taskBoards.deleteComment(user, Number(seg[1])));
   }
+  if (seg[0] === 'task_comments' && seg[1] && seg[2] === 'pin' && req.method === 'PUT') {
+    if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав закріплювати коментарі');
+    const body = await readBody(req);
+    return ok(res, await taskBoards.togglePinComment(user, Number(seg[1]), body.pinned));
+  }
   if (seg[0] === 'task_attachments' && seg[1] && !Number.isNaN(Number(seg[1]))) {
     if (!can(user, 'task_spaces', 'read')) return fail(res, 403, 'Немає доступу до задач');
     const attachmentId = Number(seg[1]);

@@ -352,7 +352,7 @@ export async function getCard(user, cardId) {
     'SELECT id, comment_id, file_name, mime, uploaded_by, created_at FROM task_attachments WHERE card_id=? ORDER BY created_at, id', cardId,
   );
   const comments = await all(
-    `SELECT cm.id, cm.user_id, u.name AS user_name, cm.body, cm.created_at
+    `SELECT cm.id, cm.user_id, u.name AS user_name, cm.body, cm.pinned, cm.created_at
      FROM task_comments cm LEFT JOIN users u ON u.id=cm.user_id WHERE cm.card_id=? ORDER BY cm.created_at, cm.id`, cardId,
   );
   const timeEntries = await all(
@@ -565,6 +565,19 @@ export async function deleteComment(user, commentId) {
   const spaceId = await spaceIdOfBoard(boardId);
   await assertMember(user, spaceId);
   await run('DELETE FROM task_comments WHERE id=?', commentId);
+  return { ok: true };
+}
+
+// Закріпити можна скільки завгодно коментарів одразу (не лише один) —
+// просто прапорець на кожному, порядок серед закріплених — за часом
+// створення самого коментаря, як і в загальній стрічці.
+export async function togglePinComment(user, commentId, pinned) {
+  const c = await get('SELECT * FROM task_comments WHERE id=?', commentId);
+  if (!c) throw Object.assign(new Error('Коментар не знайдено'), { status: 404 });
+  const { board_id: boardId } = await cardRow(c.card_id);
+  const spaceId = await spaceIdOfBoard(boardId);
+  await assertMember(user, spaceId);
+  await run('UPDATE task_comments SET pinned=? WHERE id=?', pinned ? 1 : 0, commentId);
   return { ok: true };
 }
 

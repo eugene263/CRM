@@ -149,28 +149,22 @@ function buildStatusField(card, columns, onSet) {
   return btn;
 }
 
-// compact=false — інлайн-пара «дедлайн і дата початку» (повна картка);
-// compact=true — одна кнопка-іконка з попапом на обидві дати (плашка в
-// канбані). Клік будь-де по полю (не лише по значку календаря) одразу
-// відкриває вибір дати: showPicker() саме для цього.
-// Обидва input'и мають min-width:0 і flex:1 1 0 (клас .task-dates-row) —
-// інакше в тісній клітинці таблиці полів input[type=date] не стискається
-// нижче свого нативного мінімуму й вилазить за межі рядка (був баг).
+// Кнопка-іконка з попапом на обидві дати (той самий вигляд і в повній
+// картці, і на плашці в канбані — компактніша через .mini). Показує
+// СКОРОЧЕНО (день.місяць, без року) — сам рік нікуди не дівається, він і в
+// значенні, і в попапі вибору, де справді потрібен для вибору конкретної
+// дати. { compact } лишає тільки іконку, коли дат ще не вибрано.
+const shortDate = (iso) => {
+  const parts = String(iso || '').slice(5).split('-');
+  return parts.length === 2 && parts[1] ? `${parts[1]}.${parts[0]}` : null;
+};
 function buildDatesField(card, onSet, { compact = false } = {}) {
-  if (!compact) {
-    const startInput = el('input', {
-      type: 'date', value: card.start_date || '', title: 'Дата початку',
-      onclick: (e) => e.target.showPicker?.(), onchange: () => onSet({ start_date: startInput.value || null }),
-    });
-    const dueInput = el('input', {
-      type: 'date', value: card.due_date || '', title: 'Дедлайн',
-      onclick: (e) => e.target.showPicker?.(), onchange: () => onSet({ due_date: dueInput.value || null }),
-    });
-    return el('div', { class: 'task-dates-row' }, startInput, el('span', { class: 'muted' }, '→'), dueInput);
-  }
-  const btn = el('button', { class: 'task-picker-btn mini', type: 'button', title: 'Дати' });
-  btn.append(icon('calendar', 13));
-  if (card.due_date) btn.append(el('span', {}, card.due_date));
+  const btn = el('button', { class: `task-picker-btn${compact ? ' mini' : ''}`, type: 'button', title: 'Дати' });
+  btn.append(icon('calendar', compact ? 13 : 14));
+  const startShort = shortDate(card.start_date);
+  const dueShort = shortDate(card.due_date);
+  if (startShort || dueShort) btn.append(el('span', {}, `${startShort || '…'} → ${dueShort || '…'}`));
+  else if (!compact) btn.append(el('span', { class: 'muted' }, 'Дати'));
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     openPopover(btn, (box2) => {
@@ -289,7 +283,8 @@ function autoGrow(ta) { ta.style.height = 'auto'; ta.style.height = `${ta.scroll
 function makeBlock(type) {
   if (type === 'checklist') return { id: uid(), type, items: [{ id: uid(), text: '', checked: false }] };
   if (type === 'table') return { id: uid(), type, rows: [['', ''], ['', '']] };
-  if (type === 'toggle') return { id: uid(), type, title: '', text: '', open: true };
+  if (type === 'toggle') return { id: uid(), type, title: '', open: true, children: [{ id: uid(), type: 'paragraph', text: '' }] };
+  if (type === 'columns') return { id: uid(), type, columns: [[{ id: uid(), type: 'paragraph', text: '' }], [{ id: uid(), type: 'paragraph', text: '' }]] };
   return { id: uid(), type: 'paragraph', text: '' };
 }
 
@@ -340,17 +335,29 @@ function execFormat(div, cmd, value) { div.focus(); document.execCommand(cmd, fa
 
 // Невеличкий рядок-тулбар над текстовим блоком, зʼявляється по фокусу на
 // текст (а не floating біля курсору) — жирний/курсив/підкреслений/колір/
-// розмір, «самі основні функції».
+// розмір, «самі основні функції». Кнопки bold/italic/underline підсвічуються
+// (.active), коли курсор стоїть у тексті з цим форматуванням — видиме
+// підтвердження, що вибір «зафіксувався», а не просто клікнувся в порожнечу.
 function buildFormatToolbar(div, b, scheduleSave) {
   const sync = () => { b.text = sanitizeInlineHtml(div.innerHTML); scheduleSave(); };
+  const stateBtns = [];
+  function updateActive() {
+    stateBtns.forEach(([cmd, btn]) => {
+      try { btn.classList.toggle('active', document.queryCommandState(cmd)); } catch { /* поза фокусом — ігноруємо */ }
+    });
+  }
   const mk = (iconName, title, action, label) => {
     const btn = el('button', { class: 'desc-fmt-btn', type: 'button', title });
     if (iconName) btn.append(icon(iconName, 13));
     if (label) btn.append(label);
     btn.addEventListener('mousedown', (e) => e.preventDefault());
-    btn.addEventListener('click', () => { action(); sync(); });
+    btn.addEventListener('click', () => { action(); sync(); updateActive(); });
     return btn;
   };
+  const boldBtn = mk('bold', 'Жирний', () => execFormat(div, 'bold'));
+  const italicBtn = mk('italic', 'Курсив', () => execFormat(div, 'italic'));
+  const underlineBtn = mk('underline', 'Підкреслений', () => execFormat(div, 'underline'));
+  stateBtns.push(['bold', boldBtn], ['italic', italicBtn], ['underline', underlineBtn]);
   const colorBtn = mk('textColor', 'Колір тексту', () => {}, null);
   colorBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -358,159 +365,193 @@ function buildFormatToolbar(div, b, scheduleSave) {
       box2.append(el('div', { style: 'display:flex;gap:6px;padding:4px' }, ...TAG_COLORS.map((c) => el('button', {
         type: 'button', class: 'map-color-swatch', style: `width:18px;height:18px;background:${c.hex};border-color:${c.hex}`,
         onmousedown: (ev) => ev.preventDefault(),
-        onclick: () => { execFormat(div, 'foreColor', c.hex); sync(); box2.remove(); },
+        onclick: () => { execFormat(div, 'foreColor', c.hex); sync(); box2.remove(); div.focus(); },
       }))));
     });
   });
-  return el('div', { class: 'desc-fmt-toolbar' },
-    mk('bold', 'Жирний', () => execFormat(div, 'bold')),
-    mk('italic', 'Курсив', () => execFormat(div, 'italic')),
-    mk('underline', 'Підкреслений', () => execFormat(div, 'underline')),
-    colorBtn,
-    mk(null, 'Менший розмір', () => execFormat(div, 'fontSize', '2'), 'A-'),
-    mk(null, 'Більший розмір', () => execFormat(div, 'fontSize', '5'), 'A+'));
+  const smallerBtn = mk(null, 'Менший розмір', () => execFormat(div, 'fontSize', '2'), 'A-');
+  const biggerBtn = mk(null, 'Більший розмір', () => execFormat(div, 'fontSize', '5'), 'A+');
+  div.addEventListener('keyup', updateActive);
+  div.addEventListener('mouseup', updateActive);
+  div.addEventListener('focus', updateActive);
+  return el('div', { class: 'desc-fmt-toolbar' }, boldBtn, italicBtn, underlineBtn, colorBtn, smallerBtn, biggerBtn);
 }
 
-function renderDescriptionEditor(card, onSave) {
-  let blocks = (card.description_blocks && card.description_blocks.length)
-    ? card.description_blocks.map((b) => ({ ...b }))
-    : [{ ...makeBlock('paragraph'), text: card.description || '' }];
-  const wrap = el('div', { class: 'desc-blocks' });
-  let saveTimer = null;
-  function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => onSave(blocks), 500); }
+// Текст — contenteditable з санітизованим HTML і тулбаром форматування по
+// фокусу (жирний/курсив/підкреслений/колір/розмір).
+function renderParagraph(b, scheduleSave) {
+  const div = el('div', { class: 'desc-block-text', contenteditable: 'true', 'data-placeholder': 'Текст…' });
+  div.innerHTML = sanitizeInlineHtml(b.text || '');
+  const toolbar = buildFormatToolbar(div, b, scheduleSave);
+  toolbar.classList.add('hidden');
+  div.addEventListener('focus', () => toolbar.classList.remove('hidden'));
+  div.addEventListener('blur', () => { toolbar.classList.add('hidden'); b.text = sanitizeInlineHtml(div.innerHTML); scheduleSave(); });
+  div.addEventListener('input', () => { b.text = sanitizeInlineHtml(div.innerHTML); scheduleSave(); });
+  return el('div', {}, toolbar, div);
+}
 
-  function insertAfter(index, type) { blocks.splice(index + 1, 0, makeBlock(type)); renderAll(); scheduleSave(); }
+// Чек-лист — чекбокс і текст щільно поруч, максимально зліва (той самий
+// gap, що між іконкою й підписом поля картки).
+function renderChecklist(b, scheduleSave) {
+  const list = el('div', { class: 'desc-checklist' });
+  function renderItems() {
+    list.textContent = '';
+    if (!b.items?.length) b.items = [{ id: uid(), text: '', checked: false }];
+    b.items.forEach((it, ii) => {
+      const cb = el('input', { type: 'checkbox', checked: it.checked ? true : null, onchange: () => { it.checked = cb.checked; scheduleSave(); } });
+      const txt = el('input', {
+        class: 'desc-checklist-text', value: it.text, placeholder: 'Пункт…',
+        oninput: () => { it.text = txt.value; scheduleSave(); },
+        onkeydown: (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); b.items.splice(ii + 1, 0, { id: uid(), text: '', checked: false }); renderItems(); scheduleSave(); }
+        },
+      });
+      const rm = el('button', { class: 'btn small icon-only', title: 'Видалити пункт', onclick: () => { b.items.splice(ii, 1); renderItems(); scheduleSave(); } }, icon('close', 10));
+      list.append(el('div', { class: 'desc-checklist-row' }, cb, txt, rm));
+    });
+  }
+  renderItems();
+  return list;
+}
+
+// Таблиця — без кнопок «+ рядок/стовпець»: наведення на клітинку показує
+// маленькі приглушені хендли по кутах (верх-право = додати колонку
+// праворуч, з підсвіткою колонки; верх-ліво ПЕРШОЇ колонки = додати рядок
+// вище, з підсвіткою рядка, а для решти колонок той самий кут — видалити
+// колонку; низ-ліво першої колонки = видалити рядок).
+function renderTable(b, scheduleSave) {
+  if (!b.rows?.length) b.rows = [['', ''], ['', '']];
+  const wrapTable = el('div', { class: 'desc-table-wrap' });
+  function renderGrid() {
+    wrapTable.textContent = '';
+    const table = el('table', { class: 'desc-table' });
+    function highlightCol(ci, cls) { [...table.rows].forEach((tr) => tr.children[ci]?.classList.add(cls)); }
+    function highlightRow(ri, cls) { [...(table.rows[ri]?.children || [])].forEach((td) => td.classList.add(cls)); }
+    function clearHighlight() { table.querySelectorAll('td').forEach((td) => td.classList.remove('col-add-hl', 'col-del-hl', 'row-add-hl', 'row-del-hl')); }
+    function handle(kind, corner, onEnter, onClick, title) {
+      const btn = el('button', { type: 'button', class: `desc-table-handle ${kind} ${corner}`, title }, icon(kind === 'add' ? 'plus' : 'minus', 9));
+      btn.addEventListener('mouseenter', onEnter);
+      btn.addEventListener('mouseleave', clearHighlight);
+      btn.addEventListener('click', (e) => { e.stopPropagation(); onClick(); renderGrid(); scheduleSave(); });
+      return btn;
+    }
+    b.rows.forEach((row, ri) => {
+      const tr = el('tr', {});
+      row.forEach((cell, ci) => {
+        const input = el('input', { value: cell, oninput: (e) => { row[ci] = e.target.value; scheduleSave(); } });
+        const td = el('td', {}, input,
+          handle('add', 'top-right', () => highlightCol(ci, 'col-add-hl'), () => b.rows.forEach((r) => r.splice(ci + 1, 0, '')), 'Додати колонку праворуч'),
+          ci === 0
+            ? handle('add', 'top-left', () => highlightRow(ri, 'row-add-hl'), () => b.rows.splice(ri, 0, b.rows[0].map(() => '')), 'Додати рядок вище')
+            : (row.length > 1 ? handle('del', 'top-left', () => highlightCol(ci, 'col-del-hl'), () => b.rows.forEach((r) => r.splice(ci, 1)), 'Видалити колонку') : null),
+          ci === 0 && b.rows.length > 1
+            ? handle('del', 'bottom-left', () => highlightRow(ri, 'row-del-hl'), () => b.rows.splice(ri, 1), 'Видалити рядок')
+            : null);
+        tr.append(td);
+      });
+      table.append(tr);
+    });
+    wrapTable.append(table);
+  }
+  renderGrid();
+  return wrapTable;
+}
+
+// Спадний список — стрілочка щільно біля заголовка, без плашки під нею;
+// прихований вміст — це ПОВНОЦІННИЙ вкладений список блоків (текст/чек-
+// лист/таблиця/спадний список/колонки), а не проста нотатка.
+function renderToggle(b, scheduleSave) {
+  if (!b.children?.length) b.children = [{ id: uid(), type: 'paragraph', text: b.text || '' }];
+  const bodyWrap = el('div', { style: b.open ? '' : 'display:none' });
+  bodyWrap.append(renderBlockList(b.children, scheduleSave));
+  const chevron = icon('chevronDown', 15);
+  chevron.style.transform = b.open ? 'rotate(0deg)' : 'rotate(-90deg)';
+  const toggleBtn = el('button', {
+    class: 'desc-toggle-btn', type: 'button', title: b.open ? 'Згорнути' : 'Розгорнути',
+    onclick: () => {
+      b.open = !b.open; bodyWrap.style.display = b.open ? '' : 'none';
+      chevron.style.transform = b.open ? 'rotate(0deg)' : 'rotate(-90deg)';
+      toggleBtn.title = b.open ? 'Згорнути' : 'Розгорнути';
+      scheduleSave();
+    },
+  }, chevron);
+  const titleInput = el('input', {
+    class: 'desc-toggle-title', value: b.title || '', placeholder: 'Заголовок спадного списку…',
+    oninput: () => { b.title = titleInput.value; scheduleSave(); },
+  });
+  return el('div', {}, el('div', { class: 'desc-toggle-head' }, toggleBtn, titleInput), bodyWrap);
+}
+
+// Колонки — N незалежних вкладених списків блоків поруч; кількість колонок
+// можна збільшувати/зменшувати, у кожній — той самий «+» на додавання блоків.
+function renderColumns(b, scheduleSave) {
+  if (!b.columns?.length) b.columns = [[{ id: uid(), type: 'paragraph', text: '' }], [{ id: uid(), type: 'paragraph', text: '' }]];
+  const wrap = el('div', { class: 'desc-columns' });
+  function renderCols() {
+    wrap.textContent = '';
+    wrap.append(...b.columns.map((colBlocks, ci) => el('div', { class: 'desc-column' },
+      b.columns.length > 1
+        ? el('button', { type: 'button', class: 'desc-col-remove', title: 'Прибрати колонку', onclick: () => { b.columns.splice(ci, 1); renderCols(); scheduleSave(); } }, icon('close', 10))
+        : null,
+      renderBlockList(colBlocks, scheduleSave))));
+    wrap.append(el('button', {
+      type: 'button', class: 'desc-col-add', title: 'Додати колонку',
+      onclick: () => { b.columns.push([{ id: uid(), type: 'paragraph', text: '' }]); renderCols(); scheduleSave(); },
+    }, icon('plus', 14)));
+  }
+  renderCols();
+  return wrap;
+}
+
+function renderBlockContent(b, scheduleSave) {
+  if (b.type === 'checklist') return renderChecklist(b, scheduleSave);
+  if (b.type === 'table') return renderTable(b, scheduleSave);
+  if (b.type === 'toggle') return renderToggle(b, scheduleSave);
+  if (b.type === 'columns') return renderColumns(b, scheduleSave);
+  return renderParagraph(b, scheduleSave);
+}
+
+// Список блоків — рекурсивний: та сама функція малює і верхній рівень опису
+// картки, і вкладений вміст спадного списку/колонки. list мутується на
+// місці (splice), ніколи не переприсвоюється — інакше вкладені посилання
+// (b.children/колонка масиву) відв'язались би від батьківського блоку.
+function renderBlockList(list, scheduleSave) {
+  const wrap = el('div', { class: 'desc-blocks' });
+  function insertAfter(index, type) { list.splice(index + 1, 0, makeBlock(type)); renderAll(); scheduleSave(); }
   function removeBlock(index) {
-    blocks = blocks.length > 1 ? blocks.filter((_, i) => i !== index) : [makeBlock('paragraph')];
+    if (list.length > 1) list.splice(index, 1); else list.splice(0, list.length, makeBlock('paragraph'));
     renderAll(); scheduleSave();
   }
-
   function blockTypeMenu(anchor, index) {
     openPopover(anchor, (box2) => {
       box2.append(
         el('div', { class: 'task-popover-item', onclick: () => { box2.remove(); insertAfter(index, 'paragraph'); } }, icon('heading', 13), 'Текст'),
         el('div', { class: 'task-popover-item', onclick: () => { box2.remove(); insertAfter(index, 'checklist'); } }, icon('checkSquare', 13), 'Чек-лист'),
         el('div', { class: 'task-popover-item', onclick: () => { box2.remove(); insertAfter(index, 'table'); } }, icon('table', 13), 'Таблиця'),
-        el('div', { class: 'task-popover-item', onclick: () => { box2.remove(); insertAfter(index, 'toggle'); } }, icon('chevronDown', 13), 'Спадний список'));
+        el('div', { class: 'task-popover-item', onclick: () => { box2.remove(); insertAfter(index, 'toggle'); } }, icon('chevronDown', 13), 'Спадний список'),
+        el('div', { class: 'task-popover-item', onclick: () => { box2.remove(); insertAfter(index, 'columns'); } }, icon('grid', 13), 'Колонки'));
     });
   }
-
-  // Текст — contenteditable з санітизованим HTML і тулбаром форматування
-  // по фокусу (жирний/курсив/підкреслений/колір/розмір).
-  function renderParagraph(b) {
-    const div = el('div', { class: 'desc-block-text', contenteditable: 'true', 'data-placeholder': 'Текст…' });
-    div.innerHTML = sanitizeInlineHtml(b.text || '');
-    const toolbar = buildFormatToolbar(div, b, scheduleSave);
-    toolbar.classList.add('hidden');
-    div.addEventListener('focus', () => toolbar.classList.remove('hidden'));
-    div.addEventListener('blur', () => { toolbar.classList.add('hidden'); b.text = sanitizeInlineHtml(div.innerHTML); scheduleSave(); });
-    div.addEventListener('input', () => { b.text = sanitizeInlineHtml(div.innerHTML); scheduleSave(); });
-    return el('div', {}, toolbar, div);
-  }
-
-  // Чек-лист — чекбокс і текст щільно поруч, без прогалини, по лівому краю.
-  function renderChecklist(b) {
-    const list = el('div', { class: 'desc-checklist' });
-    function renderItems() {
-      list.textContent = '';
-      if (!b.items?.length) b.items = [{ id: uid(), text: '', checked: false }];
-      b.items.forEach((it, ii) => {
-        const cb = el('input', { type: 'checkbox', checked: it.checked ? true : null, onchange: () => { it.checked = cb.checked; scheduleSave(); } });
-        const txt = el('input', {
-          class: 'desc-checklist-text', value: it.text, placeholder: 'Пункт…',
-          oninput: () => { it.text = txt.value; scheduleSave(); },
-          onkeydown: (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); b.items.splice(ii + 1, 0, { id: uid(), text: '', checked: false }); renderItems(); scheduleSave(); }
-          },
-        });
-        const rm = el('button', { class: 'btn small icon-only', title: 'Видалити пункт', onclick: () => { b.items.splice(ii, 1); renderItems(); scheduleSave(); } }, icon('close', 10));
-        list.append(el('div', { class: 'desc-checklist-row' }, cb, txt, rm));
-      });
-    }
-    renderItems();
-    return list;
-  }
-
-  // Таблиця — без кнопок «+ рядок/стовпець»: наведення на клітинку показує
-  // маленькі хендли по кутах (верх-право = додати колонку праворуч, зелений
-  // + підсвітка колонки; верх-ліво ПЕРШОЇ колонки = додати рядок вище,
-  // зелений + підсвітка рядка, а для решти колонок той самий кут — видалити
-  // колонку, червоний; низ-ліво першої колонки = видалити рядок, червоний).
-  function renderTable(b) {
-    if (!b.rows?.length) b.rows = [['', ''], ['', '']];
-    const wrapTable = el('div', { class: 'desc-table-wrap' });
-    function renderGrid() {
-      wrapTable.textContent = '';
-      const table = el('table', { class: 'desc-table' });
-      function highlightCol(ci, cls) { [...table.rows].forEach((tr) => tr.children[ci]?.classList.add(cls)); }
-      function highlightRow(ri, cls) { [...(table.rows[ri]?.children || [])].forEach((td) => td.classList.add(cls)); }
-      function clearHighlight() { table.querySelectorAll('td').forEach((td) => td.classList.remove('col-add-hl', 'col-del-hl', 'row-add-hl', 'row-del-hl')); }
-      function handle(kind, corner, onEnter, onClick, title) {
-        const btn = el('button', { type: 'button', class: `desc-table-handle ${kind} ${corner}`, title }, icon(kind === 'add' ? 'plus' : 'minus', 9));
-        btn.addEventListener('mouseenter', onEnter);
-        btn.addEventListener('mouseleave', clearHighlight);
-        btn.addEventListener('click', (e) => { e.stopPropagation(); onClick(); renderGrid(); scheduleSave(); });
-        return btn;
-      }
-      b.rows.forEach((row, ri) => {
-        const tr = el('tr', {});
-        row.forEach((cell, ci) => {
-          const input = el('input', { value: cell, oninput: (e) => { row[ci] = e.target.value; scheduleSave(); } });
-          const td = el('td', {}, input,
-            handle('add', 'top-right', () => highlightCol(ci, 'col-add-hl'), () => b.rows.forEach((r) => r.splice(ci + 1, 0, '')), 'Додати колонку праворуч'),
-            ci === 0
-              ? handle('add', 'top-left', () => highlightRow(ri, 'row-add-hl'), () => b.rows.splice(ri, 0, b.rows[0].map(() => '')), 'Додати рядок вище')
-              : (row.length > 1 ? handle('del', 'top-left', () => highlightCol(ci, 'col-del-hl'), () => b.rows.forEach((r) => r.splice(ci, 1)), 'Видалити колонку') : null),
-            ci === 0 && b.rows.length > 1
-              ? handle('del', 'bottom-left', () => highlightRow(ri, 'row-del-hl'), () => b.rows.splice(ri, 1), 'Видалити рядок')
-              : null);
-          tr.append(td);
-        });
-        table.append(tr);
-      });
-      wrapTable.append(table);
-    }
-    renderGrid();
-    return wrapTable;
-  }
-
-  // Спадний список — стрілочка щільно біля тексту заголовка, без плашки-
-  // кнопки під нею.
-  function renderToggle(b) {
-    const body = el('textarea', {
-      class: 'desc-block-text', rows: 1, placeholder: 'Прихований текст…',
-      style: b.open ? '' : 'display:none',
-      oninput: () => { autoGrow(body); b.text = body.value; scheduleSave(); },
-    }, b.text || '');
-    const chevron = icon('chevronDown', 15);
-    chevron.style.transform = b.open ? 'rotate(0deg)' : 'rotate(-90deg)';
-    const toggleBtn = el('button', { class: 'desc-toggle-btn', type: 'button', title: b.open ? 'Згорнути' : 'Розгорнути', onclick: () => { b.open = !b.open; body.style.display = b.open ? '' : 'none'; chevron.style.transform = b.open ? 'rotate(0deg)' : 'rotate(-90deg)'; if (b.open) setTimeout(() => autoGrow(body), 0); scheduleSave(); } }, chevron);
-    const titleInput = el('input', {
-      class: 'desc-toggle-title', value: b.title || '', placeholder: 'Заголовок спадного списку…',
-      oninput: () => { b.title = titleInput.value; scheduleSave(); },
-    });
-    setTimeout(() => autoGrow(body), 0);
-    return el('div', {}, el('div', { class: 'desc-toggle-head' }, toggleBtn, titleInput), body);
-  }
-
-  function renderBlockContent(b) {
-    if (b.type === 'checklist') return renderChecklist(b);
-    if (b.type === 'table') return renderTable(b);
-    if (b.type === 'toggle') return renderToggle(b);
-    return renderParagraph(b);
-  }
-
   function renderAll() {
     wrap.textContent = '';
-    wrap.append(...blocks.map((b, i) => {
+    wrap.append(...list.map((b, i) => {
       const plusBtn = el('button', { class: 'desc-block-plus', type: 'button', title: 'Додати блок' }, icon('plus', 12));
       plusBtn.addEventListener('click', (e) => { e.stopPropagation(); blockTypeMenu(plusBtn, i); });
       const delBtn = el('button', { class: 'desc-block-del', type: 'button', title: 'Видалити блок', onclick: () => removeBlock(i) }, icon('trash', 11));
-      return el('div', { class: 'desc-block' }, el('div', { class: 'desc-block-gutter' }, plusBtn, delBtn), renderBlockContent(b));
+      return el('div', { class: 'desc-block' }, el('div', { class: 'desc-block-gutter' }, plusBtn, delBtn), renderBlockContent(b, scheduleSave));
     }));
   }
   renderAll();
   return wrap;
+}
+
+function renderDescriptionEditor(card, onSave) {
+  const blocks = (card.description_blocks && card.description_blocks.length)
+    ? card.description_blocks.map((b) => ({ ...b }))
+    : [{ ...makeBlock('paragraph'), text: card.description || '' }];
+  let saveTimer = null;
+  function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => onSave(blocks), 500); }
+  return renderBlockList(blocks, scheduleSave);
 }
 
 // ── Пікер просторів (#/e/task_spaces) ─────────────────────────────────────
@@ -683,7 +724,9 @@ export async function renderTaskBoard(boardId) {
   let dragging = null;
   let draggingColumn = null;
   let view = 'board'; // 'board' | 'list'
-  const filters = { assigneeId: null, tagId: null };
+  // Мультивибір скрізь: 0/1/кілька виконавців, тегів, рівнів пріоритету
+  // одночасно — порожня множина = фільтр вимкнено.
+  const filters = { assigneeIds: new Set(), tagIds: new Set(), priorities: new Set() };
   // Живі лічильники таймерів прямо на плашках картки (requirement: видно
   // «скільки вже пройшло», не заходячи в картку) — інтервали з попереднього
   // рендеру канбану інакше продовжують цокати в порожнечу після reload().
@@ -693,12 +736,13 @@ export async function renderTaskBoard(boardId) {
   // картки всередині кожної колонки, самі колонки лишаються на місці
   // (порожня колонка після фільтра — це теж інформація).
   function filteredColumns() {
-    if (!filters.assigneeId && !filters.tagId) return rawColumns;
+    if (!filters.assigneeIds.size && !filters.tagIds.size && !filters.priorities.size) return rawColumns;
     return rawColumns.map((col) => ({
       ...col,
       cards: col.cards.filter((c) => {
-        if (filters.assigneeId && c.assignee_user_id !== filters.assigneeId) return false;
-        if (filters.tagId && !(c.tags || []).some((t) => t.id === filters.tagId)) return false;
+        if (filters.assigneeIds.size && !filters.assigneeIds.has(c.assignee_user_id)) return false;
+        if (filters.tagIds.size && !(c.tags || []).some((t) => filters.tagIds.has(t.id))) return false;
+        if (filters.priorities.size && !filters.priorities.has(c.priority || '')) return false;
         return true;
       }),
     }));
@@ -780,24 +824,73 @@ export async function renderTaskBoard(boardId) {
     });
   }
 
-  // Фільтри — по виконавцю й по тегу (варіанти з'являються, щойно дошка
-  // завантажена бодай раз, бо беруться з members/boardTags). Порожній вибір
-  // = без фільтра.
+  // Загальний фільтр (теги + пріоритет, мультивибір в одному попапі) і
+  // фільтр виконавців (окремо, теж мультивибір — можна одного, кількох чи
+  // всіх) — зліва направо: [загальні фільтри] [виконавці] [⋮ дошки].
+  const filterLabel = (base, count) => (count ? `${base} · ${count}` : base);
   function renderFilters() {
-    const assigneeSelect = el('select', { class: 'task-filter-select' },
-      el('option', { value: '' }, 'Усі виконавці'),
-      ...members.map((m) => el('option', { value: m.user_id, selected: filters.assigneeId === m.user_id ? true : null }, m.name)));
-    assigneeSelect.addEventListener('change', () => { filters.assigneeId = assigneeSelect.value ? Number(assigneeSelect.value) : null; renderBody(); });
-    const tagSelect = el('select', { class: 'task-filter-select' },
-      el('option', { value: '' }, 'Усі теги'),
-      ...(boardTags || []).map((t) => el('option', { value: t.id, selected: filters.tagId === t.id ? true : null }, t.name)));
-    tagSelect.addEventListener('change', () => { filters.tagId = tagSelect.value ? Number(tagSelect.value) : null; renderBody(); });
-    return el('div', { class: 'row', style: 'align-items:center;gap:6px' }, icon('filter', 14), assigneeSelect, tagSelect);
+    const filterText = el('span', {}, filterLabel('Фільтри', filters.tagIds.size + filters.priorities.size));
+    const filterBtn = el('button', { class: 'btn small task-filter-btn', type: 'button' }, icon('filter', 14), filterText);
+    filterBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openPopover(filterBtn, (box2) => {
+        box2.append(el('div', { class: 'task-popover-heading' }, 'Теги'));
+        if (!(boardTags || []).length) box2.append(el('div', { class: 'muted', style: 'padding:2px 8px 6px;font-size:12px' }, 'Тегів на дошці ще нема'));
+        (boardTags || []).forEach((t) => {
+          const cb = el('input', {
+            type: 'checkbox', checked: filters.tagIds.has(t.id) ? true : null,
+            onclick: (ev) => {
+              ev.stopPropagation();
+              if (ev.target.checked) filters.tagIds.add(t.id); else filters.tagIds.delete(t.id);
+              filterText.textContent = filterLabel('Фільтри', filters.tagIds.size + filters.priorities.size);
+              renderBody();
+            },
+          });
+          box2.append(el('div', { class: 'task-popover-item' }, cb, tagChip(t)));
+        });
+        box2.append(el('div', { class: 'task-popover-heading' }, 'Пріоритет'));
+        PRIORITIES.forEach((p) => {
+          const cb = el('input', {
+            type: 'checkbox', checked: filters.priorities.has(p.value) ? true : null,
+            onclick: (ev) => {
+              ev.stopPropagation();
+              if (ev.target.checked) filters.priorities.add(p.value); else filters.priorities.delete(p.value);
+              filterText.textContent = filterLabel('Фільтри', filters.tagIds.size + filters.priorities.size);
+              renderBody();
+            },
+          });
+          const ic = icon('flag', 13); ic.style.color = p.color;
+          box2.append(el('div', { class: 'task-popover-item' }, cb, ic, p.label));
+        });
+      });
+    });
+
+    const assigneeText = el('span', {}, filterLabel('Виконавці', filters.assigneeIds.size));
+    const assigneeBtn = el('button', { class: 'btn small task-filter-btn', type: 'button' }, icon('user', 14), assigneeText);
+    assigneeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openPopover(assigneeBtn, (box2) => {
+        if (!members.length) box2.append(el('div', { class: 'muted', style: 'padding:4px 8px;font-size:12px' }, 'Учасників ще нема'));
+        members.forEach((m) => {
+          const cb = el('input', {
+            type: 'checkbox', checked: filters.assigneeIds.has(m.user_id) ? true : null,
+            onclick: (ev) => {
+              ev.stopPropagation();
+              if (ev.target.checked) filters.assigneeIds.add(m.user_id); else filters.assigneeIds.delete(m.user_id);
+              assigneeText.textContent = filterLabel('Виконавці', filters.assigneeIds.size);
+              renderBody();
+            },
+          });
+          box2.append(el('div', { class: 'task-popover-item' }, cb, avatarEl(m.name, m.user_id, 18), m.name));
+        });
+      });
+    });
+    return [filterBtn, assigneeBtn];
   }
 
   function renderHead() {
     head.textContent = '';
-    const boardMenuBtn = el('button', { class: 'btn small icon-only', title: 'Меню дошки', onclick: (e) => { e.stopPropagation(); boardMenu(boardMenuBtn); } }, icon('more', 14));
+    const boardMenuBtn = el('button', { class: 'task-board-menu-btn', title: 'Меню дошки', onclick: (e) => { e.stopPropagation(); boardMenu(boardMenuBtn); } }, icon('more', 15));
     const viewBtn = (key, label) => el('button', {
       class: `btn small${view === key ? ' active' : ''}`, onclick: () => { view = key; renderBody(); },
     }, label);
@@ -1274,10 +1367,6 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       el('div', { class: 'task-field-label' }, icon(iconName, 14), label),
       el('div', { class: 'task-field-value' }, valueNode));
   }
-  // Дати — на всю ширину рядка (два native date input поруч потребують
-  // більше місця, ніж половина рядка при поділі на дві клітинки; звідси й
-  // був баг із датою, що вилазила за межі). ──────────────────────────────
-  function fieldRowFull(iconName, label, valueNode) { return el('div', { class: 'task-field-row' }, fieldCell(iconName, label, valueNode)); }
 
   function render() {
     const { card, space, board, columns, members, attachments, comments, tags, boardTags, timeEntries, activity, runningTimer, totalSeconds } = d;
@@ -1363,9 +1452,8 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       titleInput,
       el('div', { class: 'task-field-table' },
         fieldRow(fieldCell('dot', 'Статус', statusField), fieldCell('user', 'Виконавець', assigneeField)),
-        fieldRowFull('calendar', 'Дати', datesCell),
-        fieldRow(fieldCell('flag', 'Пріоритет', priorityField), fieldCell('tag', 'Теги', tagsField)),
-        fieldRowFull('clock', 'Трекер часу', timerCell)),
+        fieldRow(fieldCell('calendar', 'Дати', datesCell), fieldCell('flag', 'Пріоритет', priorityField)),
+        fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('tag', 'Теги', tagsField))),
       descArea,
       el('div', { class: 'task-attach-list' },
         ...attachments.map((a) => fileChip(a, canDelete ? async () => { await api.del(`/task_attachments/${a.id}`); await refresh(); } : null))),
@@ -1383,15 +1471,38 @@ export async function openTaskCard(cardId, onChange = () => {}) {
           el('div', { class: 'activity-bullet' }),
           el('div', { class: 'activity-body' }, textNode, el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(a.created_at)))) };
       }),
-      ...comments.map((c) => ({ created_at: c.created_at, node: el('div', { class: 'activity-item comment' },
-        avatarEl(c.user_name || '?', c.user_id, 22),
-        el('div', { class: 'activity-body' },
-          el('div', {}, el('b', {}, c.user_name || 'Хтось'), ': ', c.body),
-          c.attachments.length ? el('div', { style: 'margin-top:4px;display:flex;flex-direction:column;gap:2px' }, ...c.attachments.map((a) => fileChip(a))) : null,
-          el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(c.created_at)))) })),
+      ...comments.filter((c) => !c.pinned).map((c) => ({ created_at: c.created_at, node: commentNode(c) })),
     ].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 
-    const feed = el('div', { class: 'activity-feed' }, ...feedItems.map((it) => it.node));
+    // Закріпити можна скільки завгодно коментарів одразу — вони виносяться
+    // окремим блоком нагору стрічки, у порядку, в якому їх самих написали
+    // (а не в порядку закріплення), щоб не плутати хронологію.
+    function commentNode(c) {
+      const pinBtn = el('button', {
+        class: `activity-pin-btn${c.pinned ? ' pinned' : ''}`, title: c.pinned ? 'Відкріпити' : 'Закріпити зверху',
+        onclick: async (e) => {
+          e.stopPropagation();
+          try { await api.put(`/task_comments/${c.id}/pin`, { pinned: !c.pinned }); await refresh(); }
+          catch (err) { toast(err.message, true); }
+        },
+      }, icon('pin', 12));
+      return el('div', { class: 'activity-item comment' },
+        avatarEl(c.user_name || '?', c.user_id, 22),
+        el('div', { class: 'activity-body' },
+          el('div', { class: 'row', style: 'align-items:flex-start;gap:6px' },
+            el('div', { style: 'flex:1 1 auto;min-width:0' }, el('b', {}, c.user_name || 'Хтось'), ': ', c.body),
+            pinBtn),
+          c.attachments.length ? el('div', { style: 'margin-top:4px;display:flex;flex-direction:column;gap:2px' }, ...c.attachments.map((a) => fileChip(a))) : null,
+          el('div', { class: 'muted', style: 'font-size:11px' }, fmtDate(c.created_at))));
+    }
+    const pinnedComments = comments.filter((c) => c.pinned).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    const pinnedSection = pinnedComments.length
+      ? el('div', { class: 'activity-pinned' },
+        el('div', { class: 'activity-pinned-head' }, icon('pin', 12), 'Закріплено'),
+        ...pinnedComments.map(commentNode))
+      : null;
+
+    const feed = el('div', { class: 'activity-feed' }, pinnedSection, ...feedItems.map((it) => it.node));
 
     const commentInput = el('textarea', { rows: 2, placeholder: 'Написати коментар…' });
     const commentFile = el('input', { type: 'file', style: 'display:none' });

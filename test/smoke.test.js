@@ -2313,3 +2313,31 @@ test('блоки опису (Notion-подібний редактор) збер�
   const again = (await call(`/api/task_cards/${card.id}`)).data;
   assert.equal(again.activity.filter((a) => a.kind === 'description_changed').length, 1);
 });
+
+test('коментарі можна закріпити — кілька одразу, з можливістю відкріпити', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Задача' } })).data;
+
+  const c1 = (await call(`/api/task_cards/${card.id}/comments`, { method: 'POST', body: { body: 'Перший' } })).data;
+  const c2 = (await call(`/api/task_cards/${card.id}/comments`, { method: 'POST', body: { body: 'Другий' } })).data;
+  const c3 = (await call(`/api/task_cards/${card.id}/comments`, { method: 'POST', body: { body: 'Третій' } })).data;
+
+  let got = (await call(`/api/task_cards/${card.id}`)).data;
+  assert.ok(got.comments.every((c) => c.pinned === 0));
+
+  const pin1 = await call(`/api/task_comments/${c1.id}/pin`, { method: 'PUT', body: { pinned: true } });
+  assert.equal(pin1.status, 200, JSON.stringify(pin1.data));
+  await call(`/api/task_comments/${c3.id}/pin`, { method: 'PUT', body: { pinned: true } });
+
+  got = (await call(`/api/task_cards/${card.id}`)).data;
+  const pinned = got.comments.filter((c) => c.pinned);
+  assert.deepEqual(pinned.map((c) => c.id).sort(), [c1.id, c3.id].sort());
+  assert.equal(got.comments.find((c) => c.id === c2.id).pinned, 0);
+
+  // Відкріпити — так само доступно.
+  await call(`/api/task_comments/${c1.id}/pin`, { method: 'PUT', body: { pinned: false } });
+  got = (await call(`/api/task_cards/${card.id}`)).data;
+  assert.deepEqual(got.comments.filter((c) => c.pinned).map((c) => c.id), [c3.id]);
+});

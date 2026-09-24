@@ -205,6 +205,15 @@ const migrations = [
       if (!cardCols.has('description_blocks')) await run('ALTER TABLE task_cards ADD COLUMN description_blocks TEXT');
     },
   },
+  {
+    // Закріплені коментарі — виносяться нагору стрічки Activity, можна
+    // закріпити скільки завгодно (не лише один).
+    id: '2026-09-26-task-comments-pinned',
+    async up() {
+      const cols = await columnsOf('task_comments');
+      if (!cols.has('pinned')) await run('ALTER TABLE task_comments ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+    },
+  },
 ];
 
 export async function migrate() {

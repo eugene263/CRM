@@ -237,7 +237,18 @@ label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px
 .list-col-name { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .list-due { color: var(--accent-2); }
 
-.task-filter-select { font-size: 12.5px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); }
+/* Фільтри дошки (мультивибір-попапи) і квадратна плашка меню дошки —
+   зліва направо: [Фільтри] [Виконавці] [⋮]. */
+.task-filter-btn { font-size: 12.5px; }
+.task-board-menu-btn {
+  width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); color: var(--text); cursor: pointer;
+}
+.task-board-menu-btn:hover { border-color: var(--accent); }
+.task-popover-heading {
+  padding: 6px 8px 3px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em;
+}
+.task-popover-heading:not(:first-child) { border-top: 1px solid var(--line); margin-top: 4px; }
 
 /* Швидке створення картки — заголовок на всю ширину зверху, поля-рядки
    нижче, «Зберегти» — окремою кнопкою на всю ширину внизу (не поряд із
@@ -560,11 +571,6 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 }
 .task-timer-cell { width: 100%; }
 
-/* Пара «дата початку → дедлайн»: обидва input рівно стискаються (min-width:0,
-   flex:1 1 0), інакше в тісній клітинці вони вилазять за межі рядка. */
-.task-dates-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.task-dates-row input[type="date"] { flex: 0 1 160px; min-width: 0; width: auto; }
-
 .task-desc {
   min-height: 70px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
   background: transparent; font: inherit; resize: vertical;
@@ -591,6 +597,20 @@ td.editable textarea { min-width: 220px; resize: vertical; }
 
 .activity-clickable { cursor: pointer; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; }
 .activity-clickable:hover { background: var(--panel-2); text-decoration: underline; }
+
+/* Закріплені коментарі — окремий блок нагорі стрічки; кнопка закріплення
+   з'являється по наведенню на коментар, лишається видимою, якщо вже
+   закріплено (щоб було видно, що саме закріплено, без наведення). */
+.activity-pin-btn {
+  flex: 0 0 auto; width: 20px; height: 20px; border: none; background: transparent; color: var(--muted);
+  border-radius: 5px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .12s;
+}
+.activity-item.comment:hover .activity-pin-btn, .activity-pin-btn.pinned { opacity: 1; }
+.activity-pin-btn:hover { background: var(--panel-2); color: var(--text); }
+.activity-pin-btn.pinned { color: var(--accent); }
+.activity-pinned { border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 10px; }
+.activity-pinned-head { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 
 /* Аватарка виконавця — кружечок з ініціалами; порожній стан — сіра іконка людини. */
 .task-avatar {
@@ -661,13 +681,32 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
   cursor: pointer; font-size: 11px; font-weight: 700;
 }
 .desc-fmt-btn:hover { border-color: var(--accent); }
+/* Видиме підтвердження, що форматування «зафіксувалось» на курсорі. */
+.desc-fmt-btn.active { background: var(--accent); border-color: var(--accent); color: var(--primary-text, #fff); }
 
-/* Чек-лист — чекбокс і текст щільно поруч (мінімальний gap), по лівому краю. */
+/* Чек-лист — чекбокс максимально зліва (нуль-margin, бо в браузера є свій
+   типовий відступ), той самий gap (6px), що між іконкою й підписом поля
+   картки (.task-field-label) — однаковий ритм по всій картці. */
 .desc-checklist { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
-.desc-checklist-row { display: flex; align-items: center; gap: 4px; }
+.desc-checklist-row { display: flex; align-items: center; gap: 6px; }
+.desc-checklist-row input[type="checkbox"] { margin: 0; flex: 0 0 auto; }
 .desc-checklist-text { flex: 1 1 auto; min-width: 0; border: none; background: transparent; padding: 4px 2px; border-radius: 6px; font: inherit; }
 .desc-checklist-text:hover, .desc-checklist-text:focus { background: var(--panel-2); outline: none; }
 .desc-checklist-row input[type="checkbox"]:checked + .desc-checklist-text { text-decoration: line-through; color: var(--muted); }
+
+/* Колонки — N незалежних вкладених списків блоків поруч. */
+.desc-columns { display: flex; gap: 14px; align-items: flex-start; }
+.desc-column { flex: 1 1 0; min-width: 0; position: relative; border: 1px dashed var(--line); border-radius: 8px; padding: 8px; }
+.desc-col-remove {
+  position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border: none; background: transparent;
+  color: var(--muted); border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.desc-col-remove:hover { background: var(--panel-2); color: var(--text); }
+.desc-col-add {
+  flex: 0 0 auto; align-self: stretch; min-width: 32px; border: 1.5px dashed var(--line); border-radius: 8px;
+  background: transparent; color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.desc-col-add:hover { border-color: var(--accent); color: var(--text); }
 
 /* Таблиця — без постійних кнопок «+рядок/+стовпець»: хендли по кутах
    клітинки з'являються тільки при наведенні на неї. Верх-право = завжди
@@ -681,13 +720,17 @@ div.desc-block-text:empty::before { content: attr(data-placeholder); color: var(
 .desc-table td input { width: 100%; min-width: 90px; border: none; background: transparent; padding: 6px 8px; font: inherit; }
 .desc-table td input:focus { outline: none; background: var(--panel-2); }
 .desc-table-handle {
-  position: absolute; width: 15px; height: 15px; border-radius: 50%; border: none; color: #fff;
+  position: absolute; width: 15px; height: 15px; border-radius: 50%; border: none;
   display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer;
-  opacity: 0; pointer-events: none; transition: opacity .1s; z-index: 2;
+  opacity: 0; pointer-events: none; transition: opacity .1s, background .1s; z-index: 2;
 }
 .desc-table td:hover .desc-table-handle { opacity: 1; pointer-events: auto; }
-.desc-table-handle.add { background: var(--accent-2, #12b886); }
-.desc-table-handle.del { background: var(--danger); }
+/* Приглушені (не яскраво-зелений/червоний) — легкий тон кольору поверх
+   панелі, темніє трохи на hover самої кнопки. */
+.desc-table-handle.add { background: color-mix(in srgb, var(--accent-2, #12b886) 45%, var(--panel-2)); color: var(--text); }
+.desc-table-handle.add:hover { background: color-mix(in srgb, var(--accent-2, #12b886) 65%, var(--panel-2)); }
+.desc-table-handle.del { background: color-mix(in srgb, var(--danger) 40%, var(--panel-2)); color: var(--text); }
+.desc-table-handle.del:hover { background: color-mix(in srgb, var(--danger) 60%, var(--panel-2)); }
 .desc-table-handle.top-right { top: -7px; right: -7px; }
 .desc-table-handle.top-left { top: -7px; left: -7px; }
 .desc-table-handle.bottom-left { bottom: -7px; left: -7px; }
