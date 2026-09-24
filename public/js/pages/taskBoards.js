@@ -743,9 +743,38 @@ function renderBlockContent(b, scheduleSave) {
 function renderBlockList(list, scheduleSave) {
   const wrap = el('div', { class: 'desc-blocks' });
   let draggingIdx = null;
+  // Виділення цілих блоків (текст/таблиця/чек-лист/будь-що) — клік по
+  // «гутеру» (порожній частині ліворуч від блоку, не по самих кнопочках)
+  // додає блок до виділення, shift+клік — діапазон; Backspace/Delete, коли
+  // є виділені блоки й фокус НЕ в тексті, який редагується — видаляє їх.
+  let selected = new Set();
+  let selectAnchor = null;
+  function clearBlockSelection() {
+    if (!selected.size) return;
+    selected.clear();
+    wrap.querySelectorAll(':scope > .desc-block.selected').forEach((r) => r.classList.remove('selected'));
+  }
+  function toggleBlockSelect(index, range) {
+    const rows = [...wrap.children];
+    if (range && selectAnchor != null) {
+      const [from, to] = [selectAnchor, index].sort((a, b) => a - b);
+      for (let i = from; i <= to; i += 1) { selected.add(i); rows[i]?.classList.add('selected'); }
+    } else {
+      selectAnchor = index;
+      if (selected.has(index)) { selected.delete(index); rows[index]?.classList.remove('selected'); }
+      else { selected.add(index); rows[index]?.classList.add('selected'); }
+    }
+  }
   function insertAfter(index, type) { list.splice(index + 1, 0, makeBlock(type)); renderAll(); scheduleSave(); }
   function removeBlock(index) {
     if (list.length > 1) list.splice(index, 1); else list.splice(0, list.length, makeBlock('paragraph'));
+    renderAll(); scheduleSave();
+  }
+  function removeSelectedBlocks() {
+    const indices = [...selected].sort((a, b) => b - a);
+    indices.forEach((i) => list.splice(i, 1));
+    if (!list.length) list.push(makeBlock('paragraph'));
+    selected.clear(); selectAnchor = null;
     renderAll(); scheduleSave();
   }
   function moveBlock(from, to) {
@@ -769,11 +798,20 @@ function renderBlockList(list, scheduleSave) {
   function renderAll() {
     wrap.textContent = '';
     wrap.append(...list.map((b, i) => {
-      const dragBtn = el('button', { class: 'desc-block-drag', type: 'button', title: 'Перетягніть, щоб перемістити' }, icon('grip', 11));
+      const dragBtn = el('button', { class: 'desc-block-drag', type: 'button', title: 'Перетягніть — щоб перемістити; клік — щоб виділити блок' }, icon('grip', 11));
+      // Клік (без перетягування) по ручці — виділяє блок, той самий підхід,
+      // що й довге затискання картки на дошці: браузер не шле click після
+      // справжнього drag-жесту, тож звичайне перетягування лишається цілим.
+      dragBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleBlockSelect(i, e.shiftKey); });
       const plusBtn = el('button', { class: 'desc-block-plus', type: 'button', title: 'Додати блок' }, icon('plus', 12));
       plusBtn.addEventListener('click', (e) => { e.stopPropagation(); blockTypeMenu(plusBtn, i); });
       const delBtn = el('button', { class: 'desc-block-del', type: 'button', title: 'Видалити блок', onclick: () => removeBlock(i) }, icon('trash', 11));
-      const row = el('div', { class: 'desc-block' }, el('div', { class: 'desc-block-gutter' }, dragBtn, plusBtn, delBtn), renderBlockContent(b, scheduleSave));
+      const gutter = el('div', { class: 'desc-block-gutter' }, dragBtn, plusBtn, delBtn);
+      gutter.addEventListener('click', (e) => {
+        if (e.target !== gutter) return; // клік саме по порожній частині, не по кнопках
+        toggleBlockSelect(i, e.shiftKey);
+      });
+      const row = el('div', { class: `desc-block${selected.has(i) ? ' selected' : ''}` }, gutter, renderBlockContent(b, scheduleSave));
       dragBtn.draggable = true;
       dragBtn.addEventListener('dragstart', (e) => { draggingIdx = i; row.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
       dragBtn.addEventListener('dragend', () => row.classList.remove('dragging'));
@@ -788,6 +826,22 @@ function renderBlockList(list, scheduleSave) {
       return row;
     }));
   }
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) clearBlockSelection(); });
+  // Backspace/Delete видаляє виділені блоки — лише коли фокус НЕ в тексті,
+  // який зараз редагується (інакше звичайне видалення символу в тексті
+  // зламалось би). Клік по кнопці-ручці ФОКУСУЄ саму кнопку (а не body!),
+  // тому перевіряємо не «фокус на body», а що активний елемент — не
+  // текстове поле (contenteditable/input/textarea).
+  function onKeydown(e) {
+    if (!wrap.isConnected) { document.removeEventListener('keydown', onKeydown); return; }
+    if (!selected.size || (e.key !== 'Backspace' && e.key !== 'Delete')) return;
+    const ae = document.activeElement;
+    const editingText = ae && (ae.isContentEditable || ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
+    if (editingText) return;
+    e.preventDefault();
+    removeSelectedBlocks();
+  }
+  document.addEventListener('keydown', onKeydown);
   renderAll();
   return wrap;
 }
@@ -967,7 +1021,7 @@ export async function renderTaskBoard(boardId) {
   // вьюхах, бо це одна й та сама renderTaskBoard(). Можна згорнути в
   // квадратні плашки-іконки (стан — у localStorage).
   const page = el('div', { style: 'display:flex;height:100%;min-width:0' });
-  const content = el('div', { style: 'display:flex;flex-direction:column;height:100%;flex:1 1 auto;min-width:0' });
+  const content = el('div', { style: 'display:flex;flex-direction:column;height:100%;flex:1 1 auto;min-width:0;padding-left:16px' });
   const head = el('div', { style: 'margin-bottom:10px' });
   const kanban = el('div', { class: 'kanban', style: 'flex:1 1 auto' });
   content.append(head, kanban);
@@ -977,6 +1031,11 @@ export async function renderTaskBoard(boardId) {
   let space, board, members, boardTags, rawColumns;
   let dragging = null;
   let draggingColumn = null;
+  // Мультивибір карток (затиснути — обрати, потім клікати ще для набору) —
+  // саме для нього правий клік по картці відкриває bulk-дії замість
+  // одиночного видалення. Зберігаємо тільки id — DOM перемальовується при
+  // кожному reload(), тож .selected навішуємо заново в renderCard().
+  let selectedCardIds = new Set();
   let view = 'board'; // 'board' | 'list' | 'calendar'
   let calMode = 'week'; // 'week' | 'month' — тільки для view === 'calendar'
   let calAnchor = new Date();
@@ -1051,6 +1110,42 @@ export async function renderTaskBoard(boardId) {
     await reload();
   });
 
+  // Список типових задач і скільки годин на них зазвичай ставлять — орієнтир
+  // для AI, коли вона оцінює estimate за описом (кнопка-іскорка біля поля
+  // Estimate). Рядки редагуються прямо в модалці, порожні відкидаються при
+  // збереженні (те саме робить і бек, це — підстраховка на клієнті).
+  function openEstimateNormsModal() {
+    const initial = board.estimate_norms && board.estimate_norms.length ? board.estimate_norms : [{ label: '', hours: 0 }];
+    const rows = [];
+    const list = el('div', { class: 'estimate-norms-list' });
+    const addRow = (row = { label: '', hours: 0 }) => {
+      const idx = rows.length;
+      rows.push({ label: row.label || '', hours: row.hours || 0 });
+      const labelInput = el('input', { value: rows[idx].label, placeholder: 'Напр., ресерч, створення акаунта…' });
+      const hoursInput = el('input', { type: 'number', min: '0', step: '0.25', value: rows[idx].hours || '', placeholder: 'год', style: 'width:70px' });
+      labelInput.addEventListener('input', () => { rows[idx].label = labelInput.value; });
+      hoursInput.addEventListener('input', () => { rows[idx].hours = Number(hoursInput.value) || 0; });
+      const line = el('div', { class: 'estimate-norms-row' },
+        labelInput, hoursInput,
+        el('button', { class: 'btn small icon-only danger', type: 'button', onclick: () => { rows[idx] = null; line.remove(); } }, icon('trash', 12)));
+      list.append(line);
+    };
+    initial.forEach(addRow);
+    const addBtn = el('button', { class: 'btn small', type: 'button', onclick: () => addRow() }, withIcon('plus', 'Додати рядок'));
+    const content = el('div', { class: 'field', style: 'min-width:360px' },
+      el('div', { class: 'muted', style: 'font-size:12.5px;margin-bottom:8px' },
+        'Орієнтир для AI, коли вона оцінює час за описом задачі: типові задачі цієї дошки й скільки годин на них зазвичай іде.'),
+      list, addBtn);
+    const m = modal('Норма estimate', content, [actionButton('Зберегти', async () => {
+      const clean = rows.filter(Boolean).map((r) => ({ label: String(r.label || '').trim(), hours: Number(r.hours) || 0 })).filter((r) => r.label);
+      try {
+        await api.put(`/task_boards/${boardId}`, { estimate_norms: clean });
+        board.estimate_norms = clean;
+        m.remove();
+      } catch (e) { toast(e.message, true); }
+    })]);
+  }
+
   function boardMenu(anchor) {
     openPopover(anchor, (box2) => {
       box2.append(
@@ -1068,6 +1163,10 @@ export async function renderTaskBoard(boardId) {
               })]);
           },
         }, icon('edit', 13), 'Перейменувати дошку') : null,
+        canEdit ? el('div', {
+          class: 'task-popover-item',
+          onclick: () => { box2.remove(); openEstimateNormsModal(); },
+        }, icon('gauge', 13), 'Норма estimate') : null,
         canDelete ? el('div', {
           class: 'task-popover-item danger',
           onclick: async () => {
@@ -1626,11 +1725,60 @@ export async function renderTaskBoard(boardId) {
       const before = index > 0 ? Number(items[index - 1].dataset.order) : null;
       const after = index < items.length ? Number(items[index].dataset.order) : null;
       try { await api.post(`/task_cards/${dragging.id}/move`, { column_id: col.id, board_order: orderBetween(before, after) }); }
-      catch (e2) { toast(e2.message, true); }
+      catch (e2) { if (e2.status === 409) wipLimitNotice(e2.message); else toast(e2.message, true); }
       await reload();
     });
     return column;
   }
+
+  // WIP-ліміт («в роботі» — не більше однієї задачі на людину): окреме
+  // спливне сповіщення, СПРАВА ЗВЕРХУ (звичайний toast() — знизу справа й
+  // призначений для всього іншого в застосунку, тут навмисно окремо).
+  function wipLimitNotice(message) {
+    document.querySelector('.wip-limit-notice')?.remove();
+    const notice = el('div', { class: 'wip-limit-notice' },
+      icon('alert', 16),
+      el('div', {}, el('div', { style: 'font-weight:600;margin-bottom:2px' }, 'Не можна перенести задачу'), el('div', {}, message)),
+      el('button', { class: 'btn small icon-only', type: 'button', onclick: () => notice.remove() }, icon('close', 12)));
+    document.body.append(notice);
+    setTimeout(() => notice.remove(), 6000);
+  }
+
+  // Bulk-попап по правому кліку — «наразі це тільки видалення карточки»
+  // (для однієї картки чи для всього поточного мультивибору одразу).
+  function openCardContextMenu(e, cardIds) {
+    document.querySelector('.task-popover')?.remove();
+    const menu = el('div', { class: 'task-popover', style: `position:fixed;left:${e.clientX}px;top:${e.clientY}px;visibility:hidden` });
+    const count = cardIds.length;
+    menu.append(el('div', {
+      class: 'task-popover-item danger',
+      onclick: async () => {
+        menu.remove();
+        if (!confirm(count > 1 ? `Видалити ${count} задачі?` : 'Видалити цю задачу?')) return;
+        try {
+          await Promise.all(cardIds.map((id) => api.del(`/task_cards/${id}`)));
+          clearSelection();
+          await reload();
+        } catch (err) { toast(err.message, true); }
+      },
+    }, icon('trash', 13), count > 1 ? `Видалити (${count})` : 'Видалити'));
+    document.body.append(menu);
+    const maxLeft = window.innerWidth - menu.offsetWidth - 8;
+    const maxTop = window.innerHeight - menu.offsetHeight - 8;
+    menu.style.left = `${Math.min(e.clientX, Math.max(8, maxLeft))}px`;
+    menu.style.top = `${Math.min(e.clientY, Math.max(8, maxTop))}px`;
+    menu.style.visibility = '';
+    const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+    setTimeout(() => document.addEventListener('mousedown', close), 0);
+  }
+
+  function clearSelection() {
+    selectedCardIds.forEach((id) => kanban.querySelector(`.kanban-card[data-card-id="${id}"]`)?.classList.remove('selected'));
+    selectedCardIds.clear();
+  }
+  kanban.addEventListener('click', (e) => {
+    if (selectedCardIds.size && !e.target.closest('.kanban-card')) clearSelection();
+  });
 
   function renderCard(c) {
     const card = el('div', { class: 'kanban-card', draggable: 'true', 'data-card-id': c.id, 'data-order': c.board_order },
@@ -1663,6 +1811,7 @@ export async function renderTaskBoard(boardId) {
     const progress = progressBarNode(c.total_seconds, c.estimate_minutes, true);
     if (progress) card.append(progress);
     if (timerNode) card.append(timerNode);
+    if (selectedCardIds.has(c.id)) card.classList.add('selected');
     card.addEventListener('dragstart', () => {
       dragging = { id: c.id }; card.classList.add('dragging'); startAutoScroll();
     });
@@ -1670,7 +1819,39 @@ export async function renderTaskBoard(boardId) {
       card.classList.remove('dragging'); dragging = null; stopAutoScroll(); clearIndicator();
       kanban.querySelectorAll('.kanban-col').forEach((k) => k.classList.remove('drag-over'));
     });
-    card.addEventListener('click', () => openTaskCard(c.id, reload));
+
+    // Затиснути (не клікнути!) картку — обрати її для мультивибору; поки
+    // курсор не зрушив і не відпустили кнопку до спливання таймеру, це не
+    // клік і не початок drag (draggable тимчасово вимикаємо на час чекання).
+    const toggleSelected = () => {
+      if (selectedCardIds.has(c.id)) { selectedCardIds.delete(c.id); card.classList.remove('selected'); }
+      else { selectedCardIds.add(c.id); card.classList.add('selected'); }
+    };
+    let pressTimer = null, pressStart = null, longPressed = false;
+    const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } card.draggable = true; };
+    card.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      longPressed = false;
+      pressStart = { x: e.clientX, y: e.clientY };
+      card.draggable = false;
+      pressTimer = setTimeout(() => { longPressed = true; card.draggable = true; toggleSelected(); }, 480);
+    });
+    card.addEventListener('pointerup', cancelPress);
+    card.addEventListener('pointerleave', cancelPress);
+    card.addEventListener('pointermove', (e) => {
+      if (!pressTimer || !pressStart) return;
+      if (Math.abs(e.clientX - pressStart.x) > 6 || Math.abs(e.clientY - pressStart.y) > 6) cancelPress();
+    });
+    card.addEventListener('click', (e) => {
+      if (longPressed) { longPressed = false; e.preventDefault(); e.stopPropagation(); return; }
+      if (selectedCardIds.size) { toggleSelected(); return; }
+      openTaskCard(c.id, reload);
+    });
+    card.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (!selectedCardIds.has(c.id)) { clearSelection(); selectedCardIds.add(c.id); card.classList.add('selected'); }
+      openCardContextMenu(e, [...selectedCardIds]);
+    });
     return card;
   }
 
@@ -1845,10 +2026,12 @@ export async function openTaskCard(cardId, onChange = () => {}) {
     }
   }
 
+  // Плашка прикріпленого файлу — кнопка видалення (квадратна, червона
+  // іконка) з'являється лише при наведенні на саму плашку.
   function fileChip(a, onDelete) {
-    return el('div', { class: 'row', style: 'align-items:center;gap:6px;font-size:12.5px' },
-      el('a', { href: `/api/task_attachments/${a.id}/file`, target: '_blank', rel: 'noreferrer', class: 'with-icon' }, icon('paperclip', 13), a.file_name),
-      onDelete ? el('button', { class: 'btn small icon-only danger', onclick: onDelete }, icon('trash', 11)) : null);
+    return el('div', { class: 'task-file-chip' },
+      el('a', { href: `/api/task_attachments/${a.id}/file`, target: '_blank', rel: 'noreferrer', class: 'task-file-chip-link with-icon' }, icon('paperclip', 13), el('span', { class: 'task-file-chip-name' }, a.file_name)),
+      onDelete ? el('button', { class: 'task-file-chip-del', type: 'button', title: 'Видалити файл', onclick: onDelete }, icon('close', 12)) : null);
   }
 
   // Невеличкий попап на місці кліку (а не окрема модалка): час початку —
@@ -1987,7 +2170,33 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       const v = estimateInput.value.trim();
       patch({ estimate_minutes: v ? Math.round(Number(v) * 60) : null });
     });
-    const estimateField = el('div', { style: 'display:flex;align-items:center;gap:6px' }, estimateInput, el('span', { class: 'muted' }, 'год'));
+    // Текст опису без HTML-розмітки — для AI-запитів (уточнення опису,
+    // оцінка estimate): чим детальніший опис, тим більший текст тут, а
+    // отже — і більший обсяг, який AI закладе в оцінку часу.
+    function descriptionPlainText() {
+      return (card.description_blocks || [])
+        .filter((b) => b.type === 'paragraph')
+        .map((b) => String(b.text || '').replace(/<[^>]+>/g, ' ').trim())
+        .filter(Boolean).join('\n');
+    }
+    // AI-оцінка estimate — кнопка-іскорка праворуч від поля: анімується,
+    // поки триває запит, і сама проставляє estimate на основі опису задачі;
+    // без опису — неактивна (лише інформаційне повідомлення при кліку).
+    const aiEstimateBtn = el('button', {
+      class: 'task-ai-estimate-btn', type: 'button', title: 'AI-оцінка часу за описом задачі',
+      onclick: async () => {
+        const desc = descriptionPlainText();
+        if (!desc) { toast('Спочатку додайте опис задачі — AI оцінює час саме за його обсягом', true); return; }
+        if (aiEstimateBtn.classList.contains('loading')) return;
+        aiEstimateBtn.classList.add('loading');
+        try {
+          const res = await api.post(`/task_cards/${cardId}/estimate_ai`, { description: desc });
+          if (res.hours) await patch({ estimate_minutes: Math.round(res.hours * 60) });
+        } catch (e) { toast(e.message, true); }
+        finally { aiEstimateBtn.classList.remove('loading'); }
+      },
+    }, icon('sparkles', 14));
+    const estimateField = el('div', { style: 'display:flex;align-items:center;gap:6px' }, estimateInput, el('span', { class: 'muted' }, 'год'), aiEstimateBtn);
     const authorField = el('div', { class: 'with-icon' }, avatarEl(card.creator_name || '?', card.created_by, 18), card.creator_name || '—');
 
     // Автозбереження блоків опису НЕ йде через звичайний patch()/refresh() —
@@ -2012,12 +2221,7 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       box.append(loading);
       try {
         const body = { notes, detail };
-        if (editExisting) {
-          body.existing = (card.description_blocks || [])
-            .filter((b) => b.type === 'paragraph')
-            .map((b) => String(b.text || '').replace(/<[^>]+>/g, ' ').trim())
-            .filter(Boolean).join('\n');
-        }
+        if (editExisting) body.existing = descriptionPlainText();
         const res = await api.post(`/task_cards/${cardId}/generate_description`, body);
         const text = String(res.text || '').trim();
         if (text) {
@@ -2038,17 +2242,68 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       finally { loading.remove(); }
     }
 
-    // Три кнопки рівня деталізації — тепер у шапці попапу (зліва від
-    // хрестика), а не окремим рядком у тілі; поле уточнення — велике
-    // (textarea, ~в 2.5-3 рази вища за звичайне однорядкове поле), кнопка
-    // праворуч від нього — саме «Згенерувати» (текстова, на всю висоту
-    // поля), а не сплющена іконка-«надіслати».
+    // Мікрофон + маленька кнопка надсилання — ВСЕРЕДИНІ поля вводу (правий
+    // нижній кут), а не окрема велика кнопка на всю висоту поля. Мікрофон —
+    // голосове диктування (Web Speech API, uk-UA): клік запускає запис
+    // (кнопка отримує клас .recording — пульсуюча анімація), розпізнаний
+    // текст дописується в textarea; повторний клік або природне завершення
+    // запису його зупиняють.
+    function buildAiInputWrap(notesInput, onSend) {
+      let recognition = null;
+      let recording = false;
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const stopRecording = () => { try { recognition?.stop(); } catch { /* noop */ } };
+      const micBtn = el('button', {
+        class: 'task-ai-mic-btn', type: 'button', title: 'Диктувати голосом',
+        onclick: () => {
+          if (recording) { stopRecording(); return; }
+          if (!SR) { toast('Голосове введення не підтримується цим браузером', true); return; }
+          recognition = new SR();
+          recognition.lang = 'uk-UA';
+          recognition.interimResults = false;
+          recognition.continuous = true;
+          recognition.onresult = (ev) => {
+            let text = '';
+            for (let i = ev.resultIndex; i < ev.results.length; i += 1) text += ev.results[i][0].transcript;
+            if (text.trim()) notesInput.value = (notesInput.value.trim() ? `${notesInput.value.trim()} ` : '') + text.trim();
+          };
+          recognition.onerror = () => { recording = false; micBtn.classList.remove('recording'); };
+          recognition.onend = () => { recording = false; micBtn.classList.remove('recording'); };
+          try { recognition.start(); recording = true; micBtn.classList.add('recording'); }
+          catch { toast('Не вдалося увімкнути мікрофон', true); }
+        },
+      }, icon('mic', 14));
+      if (!SR) micBtn.title = 'Голосове введення не підтримується цим браузером';
+      const sendBtn = el('button', { class: 'task-ai-send-btn', type: 'button', title: 'Надіслати', onclick: () => { stopRecording(); onSend(); } }, icon('send', 14));
+      const wrap = el('div', { class: 'task-ai-input-wrap' }, notesInput, el('div', { class: 'task-ai-input-controls' }, micBtn, sendBtn));
+      wrap._stopRecording = stopRecording;
+      return wrap;
+    }
+
+    // Закриття по кліку будь-де поза попапом — той самий підхід, що й у
+    // openPopover (мишдаун поза панеллю й поза кнопкою-якорем закриває її).
+    function closeAiPanelOnOutsideClick(panel, anchor) {
+      const close = (e) => {
+        if (!panel.isConnected) { document.removeEventListener('mousedown', close); return; }
+        if (!panel.contains(e.target) && e.target !== anchor && !anchor?.contains?.(e.target)) {
+          panel._stopRecording?.();
+          panel.remove();
+          document.removeEventListener('mousedown', close);
+        }
+      };
+      setTimeout(() => document.addEventListener('mousedown', close), 0);
+    }
+
+    // Три кнопки рівня деталізації — у шапці попапу (зліва від хрестика);
+    // поле уточнення — велике (textarea), мікрофон і маленька кнопка
+    // надсилання — всередині поля, в правому нижньому куті.
     function openAiDescPanel() {
       box.querySelector('.task-ai-desc-panel')?.remove();
       let detail = 'standard';
       const panel = el('div', { class: 'task-ai-desc-panel' });
       const doGenerate = () => {
         const notes = notesInput.value.trim();
+        panel._stopRecording?.();
         panel.remove();
         generateAiDescription({ notes, detail });
       };
@@ -2057,6 +2312,8 @@ export async function openTaskCard(cardId, onChange = () => {}) {
         onclick: () => { detail = key; renderPanel(); },
       }, label);
       const notesInput = el('textarea', { class: 'task-ai-desc-input', rows: 5, placeholder: 'Уточніть, що додати в опис (необов’язково)…' });
+      const inputWrap = buildAiInputWrap(notesInput, doGenerate);
+      panel._stopRecording = () => inputWrap._stopRecording?.();
       function renderPanel() {
         panel.textContent = '';
         panel.append(
@@ -2064,15 +2321,14 @@ export async function openTaskCard(cardId, onChange = () => {}) {
             withIcon('sparkles', 'AI-опис задачі'),
             el('div', { style: 'flex:1 1 auto' }),
             el('div', { class: 'task-ai-level-row' }, levelBtn('brief', 'Коротко'), levelBtn('standard', 'Стандартно'), levelBtn('detailed', 'Детально')),
-            el('button', { class: 'btn small icon-only', type: 'button', onclick: () => panel.remove() }, icon('close', 13))),
+            el('button', { class: 'btn small icon-only', type: 'button', onclick: () => { panel._stopRecording?.(); panel.remove(); } }, icon('close', 13))),
           el('div', { class: 'task-ai-desc-body' },
             el('div', { class: 'muted', style: 'font-size:12.5px' }, 'Опишу задачу на основі назви — можна одразу уточнити деталі нижче.')),
-          el('div', { class: 'task-ai-desc-input-row' },
-            notesInput,
-            el('button', { class: 'btn primary task-ai-generate-btn', type: 'button', onclick: doGenerate }, withIcon('sparkles', 'Згенерувати'))));
+          el('div', { class: 'task-ai-desc-input-row' }, inputWrap));
       }
       renderPanel();
       box.append(panel);
+      closeAiPanelOnOutsideClick(panel, aiDescBtn);
       notesInput.focus();
     }
 
@@ -2088,17 +2344,19 @@ export async function openTaskCard(cardId, onChange = () => {}) {
       const doSend = () => {
         const notes = notesInput.value.trim();
         if (!notes) { notesInput.focus(); return; }
+        panel._stopRecording?.();
         panel.remove();
         generateAiDescription({ notes, detail: 'standard', editExisting: true });
       };
+      const inputWrap = buildAiInputWrap(notesInput, doSend);
+      panel._stopRecording = () => inputWrap._stopRecording?.();
       panel.append(
         el('div', { class: 'task-ai-desc-head' },
           withIcon('sparkles', 'Уточнити опис'), el('div', { style: 'flex:1 1 auto' }),
-          el('button', { class: 'btn small icon-only', type: 'button', onclick: () => panel.remove() }, icon('close', 13))),
-        el('div', { class: 'task-ai-desc-input-row' },
-          notesInput,
-          el('button', { class: 'btn primary task-ai-generate-btn', type: 'button', onclick: doSend }, withIcon('send', 'Надіслати'))));
+          el('button', { class: 'btn small icon-only', type: 'button', onclick: () => { panel._stopRecording?.(); panel.remove(); } }, icon('close', 13))),
+        el('div', { class: 'task-ai-desc-input-row' }, inputWrap));
       box.append(panel);
+      closeAiPanelOnOutsideClick(panel, aiEditBtn);
       notesInput.focus();
     }
 

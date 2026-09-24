@@ -181,6 +181,12 @@ export async function renameBoard(user, boardId, patch) {
   const data = {};
   if ('name' in patch) data.name = requireName(patch.name);
   if ('icon' in patch) data.icon = patch.icon || null;
+  if ('estimate_norms' in patch) {
+    const rows = Array.isArray(patch.estimate_norms) ? patch.estimate_norms : [];
+    data.estimate_norms = JSON.stringify(rows
+      .map((r) => ({ label: String(r.label || '').trim().slice(0, 200), hours: Number(r.hours) || 0 }))
+      .filter((r) => r.label));
+  }
   if (!Object.keys(data).length) return { ok: true };
   await run(`UPDATE task_boards SET ${Object.keys(data).map((k) => `${k}=?`).join(',')} WHERE id=?`, ...Object.values(data), boardId);
   return { ok: true };
@@ -249,7 +255,10 @@ export async function getBoard(user, boardId) {
     });
   }
   const boardTags = await all('SELECT id, name, color FROM task_tags WHERE board_id=? ORDER BY name', boardId);
-  return { space, board, members, boardTags, columns: [...byColumn.values()] };
+  return {
+    space, members, boardTags, columns: [...byColumn.values()],
+    board: { ...board, estimate_norms: board.estimate_norms ? JSON.parse(board.estimate_norms) : [] },
+  };
 }
 
 // ── Теги (керовані записи на дошку: назва + колір) ─────────────────────
@@ -557,6 +566,42 @@ export async function generateCardDescription(user, cardId, { notes, detail, exi
   return { text: text.trim() };
 }
 
+// AI-оцінка часу (estimate) — читає ФАКТИЧНИЙ опис задачі (обсяг тексту
+// сам по собі вже відображає рівень деталізації, обраний при генерації
+// опису — коротко/стандартно/детально, — тож окремо його передавати не
+// треба) плюс «норму estimate» дошки (список орієнтирів у годинах на
+// типові задачі), і повертає ОДНЕ число годин. Без опису — відмова з
+// чіткою причиною (перевіряється і на фронтенді, щоб не бити дарма API,
+// але й тут теж — про всяк випадок прямого виклику).
+export async function estimateCardAi(user, cardId, { description } = {}) {
+  const { board_id: boardId } = await cardRow(cardId);
+  const spaceId = await spaceIdOfBoard(boardId);
+  await assertMember(user, spaceId);
+  const desc = String(description || '').trim();
+  if (!desc) throw Object.assign(new Error('Спочатку додайте опис задачі — AI оцінює час саме за його обсягом і змістом'), { status: 400 });
+  const card = await get('SELECT title FROM task_cards WHERE id=?', cardId);
+  const board = await get('SELECT estimate_norms FROM task_boards WHERE id=?', boardId);
+  const norms = board?.estimate_norms ? JSON.parse(board.estimate_norms) : [];
+  const prompt = [
+    'Ти — помічник, що оцінює, скільки ГОДИН типово йде на виконання задачі в робочому таск-трекері, на основі її опису.',
+    `Назва задачі: "${card.title}"`,
+    `Опис задачі:\n"""\n${desc.slice(0, 3000)}\n"""`,
+    norms.length ? `Орієнтир команди (типові задачі й скільки годин на них зазвичай ставлять):\n${norms.map((n) => `- ${n.label}: ${n.hours} год`).join('\n')}` : null,
+    'Врахуй реальний обсяг роботи, описаний у тексті (докладний опис — це, як правило, більший обсяг задачі).',
+    'Виведи У ВІДПОВІДІ ЛИШЕ ОДНЕ число годин (можна дробове, наприклад 2.5) — без жодного тексту навколо.',
+  ].filter(Boolean).join('\n');
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (!hasGeminiKeys() && !anthropicKey) {
+    throw Object.assign(new Error('AI-оцінка не налаштована: додайте GEMINI_API_KEY(S) або ANTHROPIC_API_KEY'), { status: 400 });
+  }
+  const text = hasGeminiKeys() ? await geminiText(prompt) : await callAnthropicPlain(anthropicKey, prompt);
+  const match = String(text).match(/\d+([.,]\d+)?/);
+  if (!match) throw Object.assign(new Error('AI не зміг визначити оцінку часу — спробуйте ще раз'), { status: 502 });
+  const hours = Math.max(0.25, Math.round(Number(match[0].replace(',', '.')) * 4) / 4);
+  return { hours };
+}
+
 // Перетягнули картку саме в колонку «В роботі» — трекер часу того, хто
 // тягнув, стартує сам; перетягнули в будь-яку іншу — власний запущений
 // таймер сам зупиняється. Звірка по НАЗВІ колонки (без урахування
@@ -581,12 +626,32 @@ async function autoTrackOnMove(cardId, userId, columnName) {
   }
 }
 
+// Ліміт WIP: одна людина — не більше однієї задачі одночасно в «робочій»
+// колонці (тій самій, що й авто-трекінг вище — тій самій НАЗВОЮ). Перевірка
+// лише при реальній зміні колонки (не при переставленні всередині тієї ж).
+async function assertWipLimit(boardId, columnId, colName, cardId, cardsTable = 'task_cards') {
+  if (String(colName || '').trim().toLowerCase() !== AUTO_TRACK_COLUMN_NAME) return;
+  const card = await get(`SELECT assignee_user_id FROM ${cardsTable} WHERE id=?`, cardId);
+  if (!card?.assignee_user_id) return;
+  const clash = await get(
+    `SELECT c.id, c.title FROM ${cardsTable} c WHERE c.board_id=? AND c.column_id=? AND c.assignee_user_id=? AND c.id<>?`,
+    boardId, columnId, card.assignee_user_id, cardId,
+  );
+  if (!clash) return;
+  const assignee = await get('SELECT name FROM users WHERE id=?', card.assignee_user_id);
+  throw Object.assign(
+    new Error(`${assignee?.name || 'Виконавець'} вже має задачу «${clash.title}» у колонці «${colName}» — спершу перенесіть чи заверште її, перш ніж брати нову`),
+    { status: 409 },
+  );
+}
+
 export async function moveCard(user, cardId, columnId, boardOrder) {
   const { board_id: boardId, column_id: fromColumnId } = await cardRow(cardId);
   const spaceId = await spaceIdOfBoard(boardId);
   await assertMember(user, spaceId);
   const col = await get('SELECT id, name, board_id FROM task_columns WHERE id=?', columnId);
   if (!col || col.board_id !== boardId) throw Object.assign(new Error('Колонка не належить цій дошці'), { status: 400 });
+  if (columnId !== fromColumnId) await assertWipLimit(boardId, columnId, col.name, cardId);
   const order = boardOrder != null ? Number(boardOrder) : orderBetween(null, null);
   await run('UPDATE task_cards SET column_id=?, board_order=? WHERE id=?', columnId, order, cardId);
   if (columnId !== fromColumnId) {

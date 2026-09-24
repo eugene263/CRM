@@ -1051,6 +1051,7 @@ CREATE TABLE IF NOT EXISTS task_boards (
   space_id INTEGER NOT NULL REFERENCES task_spaces(id),
   name TEXT NOT NULL,
   icon TEXT, -- назва іконки (icons.js) для плашки дошки у згорнутому бічному меню
+  estimate_norms TEXT, -- JSON-масив {label, hours} — орієнтир для AI-оцінки часу задач цієї дошки
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))

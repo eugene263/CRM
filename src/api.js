@@ -1111,6 +1111,14 @@ export async function handleApi(req, res, url) {
       const body = await readBody(req);
       return ok(res, await taskBoards.generateCardDescription(user, cardId, body));
     }
+    if (seg[2] === 'estimate_ai' && req.method === 'POST') {
+      if (!can(user, 'task_spaces', 'update')) return fail(res, 403, 'Немає прав редагувати картку');
+      if (!rateLimit(`task-ai-estimate:${user.id}`, 15, 5 * 60_000)) {
+        return fail(res, 429, 'Забагато запитів до AI-оцінки, спробуйте за кілька хвилин');
+      }
+      const body = await readBody(req);
+      return ok(res, await taskBoards.estimateCardAi(user, cardId, body));
+    }
     return fail(res, 405, 'Метод не підтримується');
   }
   if (seg[0] === 'task_comments' && seg[1] && req.method === 'DELETE') {

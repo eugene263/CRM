@@ -234,6 +234,15 @@ const migrations = [
       if (!spaceCols.has('logo_data_url')) await run('ALTER TABLE task_spaces ADD COLUMN logo_data_url TEXT');
     },
   },
+  {
+    // Норма estimate — орієнтир для AI, скільки годин типово ставити на
+    // задачі такого типу цієї дошки (список {label, hours}).
+    id: '2026-09-29-task-boards-estimate-norms',
+    async up() {
+      const cols = await columnsOf('task_boards');
+      if (!cols.has('estimate_norms')) await run('ALTER TABLE task_boards ADD COLUMN estimate_norms TEXT');
+    },
+  },
 ];
 
 export async function migrate() {

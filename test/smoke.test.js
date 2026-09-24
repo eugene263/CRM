@@ -1906,6 +1906,72 @@ test('лого простору й іконка дошки редагуютьс�
   assert.equal(spaceAgain.boards.find((b) => b.id === boardId).icon, 'grid', 'перейменування не мало скинути іконку');
 });
 
+test('норма estimate дошки — редагується, видно в getBoard, чистить сміттєві рядки', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const upd = await call(`/api/task_boards/${boardId}`, {
+    method: 'PUT',
+    body: { estimate_norms: [{ label: 'Створення акаунта', hours: 0.5 }, { label: 'Ресерч', hours: '2' }, { label: '   ' }, {}] },
+  });
+  assert.equal(upd.status, 200, JSON.stringify(upd.data));
+  const board = await call(`/api/task_boards/${boardId}`);
+  assert.deepEqual(board.data.board.estimate_norms, [{ label: 'Створення акаунта', hours: 0.5 }, { label: 'Ресерч', hours: 2 }],
+    'порожні/сміттєві рядки без label мають бути відфільтровані, hours-рядок приведений до числа');
+
+  // Оновлення без estimate_norms у тілі не скидає норми в null.
+  await call(`/api/task_boards/${boardId}`, { method: 'PUT', body: { name: 'Перейменована' } });
+  const boardAgain = await call(`/api/task_boards/${boardId}`);
+  assert.equal(boardAgain.data.board.estimate_norms.length, 2, 'перейменування не мало скинути норми');
+});
+
+test('AI-оцінка часу задачі: без опису — зрозуміла помилка; без ключа — теж', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Оцінити мене' } })).data;
+
+  const noDesc = await call(`/api/task_cards/${card.id}/estimate_ai`, { method: 'POST', body: { description: '' } });
+  assert.equal(noDesc.status, 400);
+  assert.match(noDesc.data.error, /Спочатку додайте опис/);
+
+  // У тестовому середовищі жоден AI-ключ не заданий.
+  const res = await call(`/api/task_cards/${card.id}/estimate_ai`, { method: 'POST', body: { description: 'Налаштувати CI на трьох середовищах' } });
+  assert.equal(res.status, 400);
+  assert.match(res.data.error, /GEMINI_API_KEY/);
+  assert.match(res.data.error, /ANTHROPIC_API_KEY/);
+});
+
+test('WIP-ліміт: одна людина — не більше однієї задачі одночасно в колонці «В роботі»', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const board = await call(`/api/task_boards/${boardId}`);
+  const [todoCol, inProgressCol, doneCol] = board.data.columns;
+  assert.equal(inProgressCol.name, 'В роботі');
+  const userId = (await call('/api/refs')).data.users.find((u) => u.label.includes('Ліза')).id;
+  await call(`/api/task_spaces/${spaceId}/members`, { method: 'POST', body: { user_id: userId } });
+
+  const card1 = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: todoCol.id, title: 'Задача 1', assignee_user_id: userId } })).data;
+  const card2 = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: todoCol.id, title: 'Задача 2', assignee_user_id: userId } })).data;
+
+  const move1 = await call(`/api/task_cards/${card1.id}/move`, { method: 'POST', body: { column_id: inProgressCol.id, board_order: 500 } });
+  assert.equal(move1.status, 200, JSON.stringify(move1.data));
+
+  const move2 = await call(`/api/task_cards/${card2.id}/move`, { method: 'POST', body: { column_id: inProgressCol.id, board_order: 500 } });
+  assert.equal(move2.status, 409, JSON.stringify(move2.data));
+  assert.match(move2.data.error, /вже має задачу/);
+  const stillInTodo = await call(`/api/task_cards/${card2.id}`);
+  assert.equal(stillInTodo.data.card.column_id, todoCol.id, 'заблокований рух не мав змінити колонку картки');
+
+  // Реордер УСЕРЕДИНІ тієї самої колонки не блокується (columnId === fromColumnId).
+  const reorder = await call(`/api/task_cards/${card1.id}/move`, { method: 'POST', body: { column_id: inProgressCol.id, board_order: 100 } });
+  assert.equal(reorder.status, 200, JSON.stringify(reorder.data));
+
+  // Звільнили слот — переміщення другої картки тепер проходить.
+  await call(`/api/task_cards/${card1.id}/move`, { method: 'POST', body: { column_id: doneCol.id, board_order: 500 } });
+  const move2again = await call(`/api/task_cards/${card2.id}/move`, { method: 'POST', body: { column_id: inProgressCol.id, board_order: 500 } });
+  assert.equal(move2again.status, 200, JSON.stringify(move2again.data));
+});
+
 test('видалення простору й дошки блокується, поки в них є вкладене', async () => {
   const spaceId = await makeSpace();
   const boardId = await makeBoard(spaceId);
