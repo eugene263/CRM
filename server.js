@@ -19,6 +19,7 @@ import { seedKpi, kpiChecks } from './src/kpi.js';
 import { seedCosting } from './src/costing.js';
 import { seedScripts } from './src/scripts.js';
 import { seedClients } from './src/clients.js';
+import { taskRecurrenceChecks } from './src/taskBoards.js';
 import { backupDatabase } from './src/backup.js';
 import { captureError, installGlobalHandlers } from './src/errors.js';
 
@@ -119,6 +120,7 @@ const tick = async () => {
     await expireOverdue();       // протерміновані видачі доступів
     await prospectingChecks();   // розморозка «не зараз», застій у лідах
     await kpiChecks();           // ранковий план, пінг о 14:00, підсумок дня
+    await taskRecurrenceChecks(); // регулярні задачі — породжують наступне входження
     await backupDatabase();      // добова копія бази поруч із самою базою на томі
     await flushQueue();
   } catch (e) { await captureError(e, { logger: 'worker' }); }

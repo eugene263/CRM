@@ -1084,6 +1084,7 @@ CREATE TABLE IF NOT EXISTS task_cards (
   tags TEXT, -- застаріле: вільний текст тегів замінили на task_tags/task_card_tags нижче
   board_order REAL NOT NULL DEFAULT 0,
   estimate_minutes INTEGER, -- оцінка часу; прогрес-бар = натрекано / це
+  recurrence TEXT, -- JSON {freq:'daily'|'weekly'|'monthly', interval:N, until:'YYYY-MM-DD'|null} — регулярність задачі
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT

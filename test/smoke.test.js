@@ -1835,6 +1835,21 @@ async function makeBoard(spaceId, name = 'Дошка') {
 }
 const dataUrl = (text, mime = 'text/plain') => `data:${mime};base64,${Buffer.from(text).toString('base64')}`;
 
+// Фонова перевірка регулярних задач (taskRecurrenceChecks) працює лише з
+// tick(), а той у тестовому середовищі свідомо рідкісний (CRM_TICK_MS=
+// 3600000, щоб не заважати іншим перевіркам). Викликаємо її напряму, в
+// окремому процесі проти ТІЄЇ Ж бази, що й сам тестовий сервер.
+async function runRecurrenceCheck() {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['test/run-recurrence-check.mjs'], { env, cwd: path.join(import.meta.dirname, '..') });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+    child.on('exit', (code) => (code === 0 ? resolve(JSON.parse(out.trim())) : reject(new Error(err))));
+  });
+}
+
 test('простір створюється зі своїм списком учасників — творець одразу учасник', async () => {
   const spaceId = await makeSpace();
   const space = await call(`/api/task_spaces/${spaceId}`);
@@ -2512,4 +2527,112 @@ test('аналітика простору — рахує по ВСІХ дошк�
   assert.deepEqual(res.data.by_assignee, [{ user_id: userId, name: 'Крієйтор Ліза', count: 2 }]);
   const byPriority = Object.fromEntries(res.data.by_priority.map((r) => [r.priority || 'none', r.count]));
   assert.deepEqual(byPriority, { none: 1, low: 0, medium: 0, high: 1, urgent: 1 });
+});
+
+test('регулярність задачі — санітизація на вході, коректно зберігається й читається', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Регулярна' } })).data;
+
+  // Невідома frequency чи відсутнє значення — вимикає регулярність (null), не помилка.
+  let upd = await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { recurrence: { freq: 'yearly', interval: 1 } } });
+  assert.equal(upd.status, 200, JSON.stringify(upd.data));
+  let got = (await call(`/api/task_cards/${card.id}`)).data.card;
+  assert.equal(got.recurrence, null);
+
+  // Валідне значення: interval приводиться до цілого >=1, зайвих полів нема.
+  upd = await call(`/api/task_cards/${card.id}`, {
+    method: 'PUT', body: { recurrence: { freq: 'weekly', interval: '2.7', until: '2027-01-01', junk: 'x' } },
+  });
+  assert.equal(upd.status, 200, JSON.stringify(upd.data));
+  got = (await call(`/api/task_cards/${card.id}`)).data.card;
+  assert.deepEqual(got.recurrence, { freq: 'weekly', interval: 3, until: '2027-01-01' });
+
+  // Некоректна дата until — відкидається (null), решта валідного лишається.
+  upd = await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { recurrence: { freq: 'daily', interval: 1, until: 'не дата' } } });
+  assert.equal(upd.status, 200);
+  got = (await call(`/api/task_cards/${card.id}`)).data.card;
+  assert.deepEqual(got.recurrence, { freq: 'daily', interval: 1, until: null });
+
+  // Активність — людяний запис, не сирий JSON.
+  const activity = (await call(`/api/task_cards/${card.id}`)).data.activity;
+  const last = activity[activity.length - 1];
+  assert.equal(last.kind, 'field_changed');
+  assert.match(JSON.parse(last.payload).to, /Кожні 1 день/);
+
+  // Вимкнення (null) — теж окремий запис в Activity, а не тихе ігнорування.
+  await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { recurrence: null } });
+  got = (await call(`/api/task_cards/${card.id}`)).data.card;
+  assert.equal(got.recurrence, null);
+
+  // Оновлення БЕЗ recurrence у тілі не чіпає вже виставлену регулярність.
+  await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { recurrence: { freq: 'monthly', interval: 1 } } });
+  await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { title: 'Перейменована' } });
+  got = (await call(`/api/task_cards/${card.id}`)).data.card;
+  assert.deepEqual(got.recurrence, { freq: 'monthly', interval: 1, until: null });
+});
+
+test('регулярна задача: фонова перевірка породжує РІВНО одне наступне входження (не завалює купою «доганяючих» карток)', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const board = await call(`/api/task_boards/${boardId}`);
+  const todoCol = board.data.columns[0];
+  const userId = (await call('/api/refs')).data.users.find((u) => u.label.includes('Ліза')).id;
+  await call(`/api/task_spaces/${spaceId}/members`, { method: 'POST', body: { user_id: userId } });
+  const tagId = (await call(`/api/task_boards/${boardId}/tags`, { method: 'POST', body: { name: 'важливо', color: 'accent' } })).data.id;
+
+  // Дедлайн у далекому минулому (2000 рік) — щоб пересвідчитись, що
+  // «доганяння» не плодить картку на КОЖЕН пропущений двотижневий період.
+  const card = (await call(`/api/task_boards/${boardId}/cards`, {
+    method: 'POST', body: { column_id: todoCol.id, title: 'Регулярний звіт', priority: 'high', assignee_user_id: userId, due_date: '2000-01-01', tag_ids: [tagId] },
+  })).data;
+  await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { recurrence: { freq: 'weekly', interval: 2 } } });
+
+  const before = await call(`/api/task_boards/${boardId}`);
+  const countBefore = before.data.columns.reduce((n, c) => n + c.cards.length, 0);
+
+  const result = await runRecurrenceCheck();
+  assert.equal(result.spawned, 1, JSON.stringify(result));
+
+  const after = await call(`/api/task_boards/${boardId}`);
+  const countAfter = after.data.columns.reduce((n, c) => n + c.cards.length, 0);
+  assert.equal(countAfter, countBefore + 1, 'мала з’явитись РІВНО одна нова картка, а не купа доганяючих');
+
+  const original = (await call(`/api/task_cards/${card.id}`)).data.card;
+  assert.equal(original.recurrence, null, 'початкова картка більше не регулярна — далі веде нова');
+
+  const spawnedRow = after.data.columns.flatMap((c) => c.cards).find((c) => c.id !== card.id && c.title === 'Регулярний звіт');
+  assert.ok(spawnedRow, 'нова картка мала з’явитись у першій колонці дошки');
+  const spawned = (await call(`/api/task_cards/${spawnedRow.id}`)).data.card;
+  assert.ok(spawned.due_date >= today, `дедлайн нової картки (${spawned.due_date}) має бути не в минулому`);
+  assert.deepEqual(spawned.recurrence, { freq: 'weekly', interval: 2, until: null }, 'регулярність переноситься на нову картку');
+  assert.equal(spawned.priority, 'high');
+  assert.equal(spawned.assignee_user_id, userId);
+  const spawnedTags = (await call(`/api/task_cards/${spawnedRow.id}`)).data.tags;
+  assert.deepEqual(spawnedTags.map((t) => t.id), [tagId], 'теги теж переносяться');
+
+  // Ще один прогін одразу після — нова картка вже НЕ прострочена, тож нічого не додається.
+  const again = await runRecurrenceCheck();
+  assert.equal(again.spawned, 0);
+});
+
+test('регулярна задача з «until» у минулому — регулярність вимикається, нова картка НЕ створюється', async () => {
+  const spaceId = await makeSpace();
+  const boardId = await makeBoard(spaceId);
+  const colId = (await call(`/api/task_boards/${boardId}`)).data.columns[0].id;
+  const card = (await call(`/api/task_boards/${boardId}/cards`, { method: 'POST', body: { column_id: colId, title: 'Закінчена регулярність', due_date: '2000-01-01' } })).data;
+  await call(`/api/task_cards/${card.id}`, { method: 'PUT', body: { recurrence: { freq: 'daily', interval: 1, until: '2000-02-01' } } });
+
+  const before = await call(`/api/task_boards/${boardId}`);
+  const countBefore = before.data.columns.reduce((n, c) => n + c.cards.length, 0);
+
+  await runRecurrenceCheck();
+
+  const after = await call(`/api/task_boards/${boardId}`);
+  const countAfter = after.data.columns.reduce((n, c) => n + c.cards.length, 0);
+  assert.equal(countAfter, countBefore, 'until у минулому — нова картка не створюється');
+  const original = (await call(`/api/task_cards/${card.id}`)).data.card;
+  assert.equal(original.recurrence, null);
 });

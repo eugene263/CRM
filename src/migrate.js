@@ -243,6 +243,15 @@ const migrations = [
       if (!cols.has('estimate_norms')) await run('ALTER TABLE task_boards ADD COLUMN estimate_norms TEXT');
     },
   },
+  {
+    // Регулярність задачі — {freq, interval, until}; фоновий tick()
+    // (server.js) сам породжує наступне входження, коли дедлайн минув.
+    id: '2026-09-25-task-cards-recurrence',
+    async up() {
+      const cols = await columnsOf('task_cards');
+      if (!cols.has('recurrence')) await run('ALTER TABLE task_cards ADD COLUMN recurrence TEXT');
+    },
+  },
 ];
 
 export async function migrate() {

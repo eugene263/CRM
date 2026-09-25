@@ -485,7 +485,11 @@ export async function getCard(user, cardId) {
     else cardAttachments.push(a);
   }
   return {
-    card: { ...card, description_blocks: card.description_blocks ? JSON.parse(card.description_blocks) : null },
+    card: {
+      ...card,
+      description_blocks: card.description_blocks ? JSON.parse(card.description_blocks) : null,
+      recurrence: card.recurrence ? JSON.parse(card.recurrence) : null,
+    },
     space, board, columns, members, attachments: cardAttachments,
     tags: cardTags, boardTags,
     comments: comments.map((c) => ({ ...c, attachments: byComment.get(c.id) || [] })),
@@ -496,6 +500,33 @@ export async function getCard(user, cardId) {
 
 const CARD_FIELDS = ['title', 'description', 'start_date', 'due_date', 'priority', 'assignee_user_id', 'estimate_minutes'];
 const FIELD_LABELS = { title: 'назву', description: 'опис', start_date: 'дату початку', due_date: 'дедлайн', priority: 'пріоритет', estimate_minutes: 'оцінку часу' };
+
+// Регулярність задачі — {freq, interval, until}. Санітизуємо на вході
+// (той самий підхід, що й estimate_norms дошки): невалідне значення чи
+// невідома frequency — просто вимикає регулярність (null), а не помилка.
+const RECURRENCE_FREQS = new Set(['daily', 'weekly', 'monthly']);
+const RECURRENCE_LABELS = { daily: 'день(і)', weekly: 'тиждень(і)', monthly: 'місяць(і)' };
+function sanitizeRecurrence(r) {
+  if (!r || !RECURRENCE_FREQS.has(r.freq)) return null;
+  const interval = Math.max(1, Math.round(Number(r.interval) || 1));
+  const until = r.until && /^\d{4}-\d{2}-\d{2}$/.test(r.until) ? r.until : null;
+  return { freq: r.freq, interval, until };
+}
+function recurrenceLabel(r) {
+  if (!r) return '—';
+  const base = `Кожні ${r.interval} ${RECURRENCE_LABELS[r.freq]}`;
+  return r.until ? `${base}, до ${r.until}` : base;
+}
+// due_date ('YYYY-MM-DD') + N періодів regurrence — рахуємо через Date,
+// але зчитуємо/пишемо назад лише дату (UTC, без часу — щоб не з'їхати на
+// день через часовий пояс при переведенні в/із ISO-рядка).
+function advanceDueDate(dueDate, r) {
+  const d = new Date(`${dueDate}T00:00:00Z`);
+  if (r.freq === 'daily') d.setUTCDate(d.getUTCDate() + r.interval);
+  else if (r.freq === 'weekly') d.setUTCDate(d.getUTCDate() + r.interval * 7);
+  else if (r.freq === 'monthly') d.setUTCMonth(d.getUTCMonth() + r.interval);
+  return d.toISOString().slice(0, 10);
+}
 
 // Якщо задачі щойно поставили дату початку, а вона й досі лежить у
 // колонці ДО «До виконання»/«В роботі»/«Готово» (тобто в якомусь
@@ -549,6 +580,16 @@ export async function updateCard(user, cardId, patch) {
       await logActivity(cardId, user.id, 'description_changed', null);
     }
   }
+  // Регулярність — так само не скаляр (об'єкт чи null), і людяний
+  // запис в Activity («Кожні 2 тижні») зрозуміліший за сирий JSON.
+  if ('recurrence' in patch) {
+    const clean = sanitizeRecurrence(patch.recurrence);
+    const json = clean ? JSON.stringify(clean) : null;
+    if (json !== (current.recurrence || null)) {
+      data.recurrence = json;
+      await logActivity(cardId, user.id, 'field_changed', { field: 'регулярність', from: recurrenceLabel(current.recurrence ? JSON.parse(current.recurrence) : null), to: recurrenceLabel(clean) });
+    }
+  }
   if (!Object.keys(data).length) return { ok: true };
   data.updated_at = new Date().toISOString();
   await run(`UPDATE task_cards SET ${Object.keys(data).map((k) => `${k}=?`).join(',')} WHERE id=?`, ...Object.values(data), cardId);
@@ -556,6 +597,51 @@ export async function updateCard(user, cardId, patch) {
     await autoMoveOnStartDate(cardId, boardId, columnId, user.id);
   }
   return { ok: true };
+}
+
+// Фонова перевірка (виклик із tick() у server.js кожні CRM_TICK_MS):
+// регулярні картки, чий дедлайн уже минув, — породжують НАСТУПНЕ
+// входження (нову картку в першій колонці дошки, з перенесеними полями/
+// тегами), а самі втрачають регулярність — далі «веде» саме нова картка,
+// інакше кожен тік плодив би дублікати з тієї самої картки.
+export async function taskRecurrenceChecks() {
+  const today = new Date().toISOString().slice(0, 10);
+  const due = await all(
+    `SELECT * FROM task_cards WHERE recurrence IS NOT NULL AND due_date IS NOT NULL AND due_date<>'' AND due_date<?`,
+    today,
+  );
+  let spawned = 0;
+  for (const card of due) {
+    const rule = sanitizeRecurrence(JSON.parse(card.recurrence));
+    if (!rule) { await run('UPDATE task_cards SET recurrence=NULL WHERE id=?', card.id); continue; }
+    // Наступне входження — НЕ кожен пропущений період окремою карткою:
+    // якщо регулярну задачу довго не чіпали, один тік не має засипати
+    // дошку купою «доганяючих» карток. Рахуємо вперед, поки дата не
+    // зрівняється із сьогодні/майбутнім, і породжуємо РІВНО одну нову
+    // картку саме на цю дату.
+    let nextDue = card.due_date;
+    do { nextDue = advanceDueDate(nextDue, rule); } while (nextDue < today);
+    if (rule.until && nextDue > rule.until) {
+      await run('UPDATE task_cards SET recurrence=NULL WHERE id=?', card.id);
+      continue;
+    }
+    const firstCol = await get('SELECT id FROM task_columns WHERE board_id=? ORDER BY board_order, id LIMIT 1', card.board_id);
+    if (!firstCol) continue; // дошка без жодної колонки — підстраховка, не мало б статись
+    const maxOrder = await get('SELECT MAX(board_order) AS m FROM task_cards WHERE column_id=?', firstCol.id);
+    const newId = await insert('task_cards', {
+      board_id: card.board_id, column_id: firstCol.id, title: card.title, description: card.description,
+      description_blocks: card.description_blocks, due_date: nextDue, priority: card.priority,
+      assignee_user_id: card.assignee_user_id, estimate_minutes: card.estimate_minutes,
+      recurrence: JSON.stringify(rule), created_by: card.created_by, board_order: (maxOrder?.m ?? 0) + 1000,
+    });
+    const tagRows = await all('SELECT tag_id FROM task_card_tags WHERE card_id=?', card.id);
+    for (const t of tagRows) await run('INSERT INTO task_card_tags (card_id, tag_id) VALUES (?, ?)', newId, t.tag_id);
+    await run('UPDATE task_cards SET recurrence=NULL WHERE id=?', card.id);
+    await logActivity(newId, card.created_by, 'created', null);
+    await logActivity(card.id, card.created_by, 'field_changed', { field: 'регулярність', from: recurrenceLabel(rule), to: `створено наступну задачу (#${newId})` });
+    spawned += 1;
+  }
+  return { spawned };
 }
 
 // AI-генерація опису задачі з її назви (+ необов'язкові уточнення від

@@ -279,6 +279,64 @@ function buildDatesField(card, onSet, { compact = false } = {}) {
   return btn;
 }
 
+// Регулярність — {freq, interval, until}: наступне входження задачі
+// породжує фоновий tick() на бекенді (taskRecurrenceChecks), коли
+// дедлайн цієї картки минає. Тут — лише редагування самого правила.
+const RECURRENCE_FREQ_LABELS = { daily: 'День(і)', weekly: 'Тиждень(і)', monthly: 'Місяць(і)' };
+const recurrenceShortLabel = (r) => (r ? `Кожні ${r.interval} ${RECURRENCE_FREQ_LABELS[r.freq].toLowerCase()}` : null);
+function buildRecurrenceField(card, onSet) {
+  const btn = el('button', { class: 'task-picker-btn', type: 'button', title: 'Регулярність' });
+  function syncBtn() {
+    btn.textContent = '';
+    btn.append(icon('repeat', 14));
+    const label = recurrenceShortLabel(card.recurrence);
+    btn.append(label ? el('span', {}, label) : el('span', { class: 'muted' }, 'Немає'));
+  }
+  syncBtn();
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    let freq = card.recurrence?.freq || 'weekly';
+    openPopover(btn, (box2) => {
+      const intervalInput = el('input', { type: 'number', min: '1', step: '1', value: card.recurrence?.interval || 1, style: 'width:56px' });
+      const untilInput = withPicker(el('input', { type: 'date', value: card.recurrence?.until || '' }));
+      // Пігулки частоти — на всю ширину попапу й окремим рядком від
+      // інтервалу (не впритул одне до одного): втрьох («День(і)»/
+      // «Тиждень(і)»/«Місяць(і)») впритул з полем інтервалу вилазили за
+      // праву межу попапу (max-width:300px), тому — перенесення рядків.
+      const freqRow = el('div', { class: 'task-ai-level-row', style: 'flex-wrap:wrap' });
+      function renderFreq() {
+        freqRow.textContent = '';
+        freqRow.append(...Object.entries(RECURRENCE_FREQ_LABELS).map(([f, label]) => el('button', {
+          type: 'button', class: `task-ai-level-btn${freq === f ? ' active' : ''}`,
+          onclick: () => { freq = f; renderFreq(); },
+        }, label)));
+      }
+      renderFreq();
+      const saveBtn = el('button', {
+        class: 'btn primary small', type: 'button',
+        onclick: () => {
+          const interval = Math.max(1, Math.round(Number(intervalInput.value) || 1));
+          onSet({ recurrence: { freq, interval, until: untilInput.value || null } });
+          box2.remove();
+        },
+      }, 'Зберегти');
+      const offBtn = card.recurrence ? el('button', {
+        class: 'btn small', type: 'button',
+        onclick: () => { onSet({ recurrence: null }); box2.remove(); },
+      }, 'Вимкнути') : null;
+      box2.append(
+        el('div', { style: 'padding:8px 8px 4px;font-weight:600;font-size:12.5px' }, 'Повторення'),
+        el('div', { style: 'padding:0 8px 8px' }, freqRow),
+        el('div', { style: 'display:flex;align-items:center;gap:6px;padding:0 8px 10px;font-size:12.5px' },
+          el('span', { class: 'muted' }, 'Кожні'), intervalInput),
+        el('div', { style: 'padding:0 8px 10px' },
+          el('div', { class: 'muted', style: 'font-size:11.5px;margin-bottom:4px' }, 'До (необов’язково)'), untilInput),
+        el('div', { style: 'display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)' }, saveBtn, offBtn));
+    });
+  });
+  return btn;
+}
+
 // Теги належать дошці (task_tags), а не одній картці — обраний тут одразу
 // видно всім карткам, куди його потім призначать. applyIds(ids) — записує
 // вибір саме для ЦІЄЇ картки; afterTagsChanged() — сигнал «щось на дошці
@@ -2312,6 +2370,7 @@ export async function openTaskCard(cardId, onChange = () => {}) {
     const datesCell = buildDatesField(card, patch);
     const assigneeField = buildAssigneeField(card, members, patch);
     const priorityField = buildPriorityField(card, patch);
+    const recurrenceField = buildRecurrenceField(card, patch);
     const tagsField = buildTagsField(
       tags, boardTags, board.id,
       (tagIds) => api.put(`/task_cards/${cardId}/tags`, { tag_ids: tagIds }).then(refresh),
@@ -2597,7 +2656,8 @@ export async function openTaskCard(cardId, onChange = () => {}) {
         fieldRow(fieldCell('dot', 'Статус', statusField), fieldCell('user', 'Виконавець', assigneeField)),
         fieldRow(fieldCell('calendar', 'Дати', datesCell), fieldCell('flag', 'Пріоритет', priorityField)),
         fieldRow(fieldCell('gauge', 'Estimate', estimateField), fieldCell('tag', 'Теги', tagsField)),
-        fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('idCard', 'Автор', authorField))));
+        fieldRow(fieldCell('clock', 'Трекер часу', timerCell), fieldCell('idCard', 'Автор', authorField)),
+        fieldRow(fieldCell('repeat', 'Регулярність', recurrenceField))));
     const scroll = el('div', { class: 'task-drawer-scroll' },
       descHeader,
       descArea,
